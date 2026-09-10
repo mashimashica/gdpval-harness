@@ -27,6 +27,7 @@
 #   nemotron_recipes/lightning-3.5/instruct/gym/gdpval/gdpval.sh                         # full benchmark (220 tasks x 1)
 #   LIMIT=3 nemotron_recipes/lightning-3.5/instruct/gym/gdpval/gdpval.sh                 # quick smoke
 #   OUT=<dir> PARALLEL=<n> nemotron_recipes/lightning-3.5/instruct/gym/gdpval/gdpval.sh  # output dir, concurrency
+#   GDPVAL_MODEL_TYPE=<type> .../gdpval.sh                                               # alternate Gym model type
 #
 # Scores each deliverable against its rubric. Comparison mode instead scores against
 # reference deliverables you generate yourself, one subdirectory per reference model;
@@ -52,7 +53,17 @@ fi
 STIR=gdpval_stirrup_agent.responses_api_agents.stirrup_agent
 GDR=gdpval_resources_server.resources_servers.gdpval
 JUDGE=gdpval_judge_model.responses_api_models.openai_model
-POLICY=policy_model.responses_api_models.vllm_model
+MODEL_TYPE="${GDPVAL_MODEL_TYPE:-vllm_model}"
+
+# The Nemotron reproduction settings below are specific to the vLLM policy model.
+# Do not inject them into other Gym model backends.
+MODEL_OVR=()
+if [ "$MODEL_TYPE" = "vllm_model" ]; then
+  POLICY=policy_model.responses_api_models.vllm_model
+  MODEL_OVR=("++$POLICY.chat_template_kwargs={enable_thinking: true}"
+             "++$POLICY.extra_body={skip_special_tokens: false}"
+             "++$POLICY.sequential_reasoning_allowed=false")
+fi
 
 # Absolute path required. A comparison run points GDPVAL_REFS at one of these.
 DELIVERABLES="${PERSIST_DELIVERABLES_DIR:-$(realpath -m "${OUT:-./results/gdpval}/deliverables")}"
@@ -103,22 +114,22 @@ if [ "$MODE" = comparison ]; then
   echo "gdpval: comparison against $found rated reference(s)" >&2
 fi
 
-# Pin Gym to the commit the tech report numbers were produced with. Set PIN_GYM=0 to
-# run against your current checkout instead. `nemotron_recipes` is excluded, so this
-# never touches the recipe that is running, and HEAD does not move. Undo the pin with
-# `git restore .` from the repo root.
+# The original reproduction recipe can pin Gym to the commit used for the tech report.
+# Harness runs leave the working tree untouched by default. Set PIN_GYM=1 explicitly
+# when reproducing the pinned environment; nemotron_recipes is excluded and HEAD does
+# not move, but tracked source files outside that directory are restored from GYM_PIN.
 GYM_PIN="${GYM_PIN:-57c15a22f8b82d3d859b71468fe3329f4e2093b4}"
-if [ "${PIN_GYM:-1}" != 0 ]; then
+if [ "${PIN_GYM:-0}" != 0 ]; then
   git rev-parse --verify -q "$GYM_PIN^{commit}" >/dev/null 2>&1 || git fetch origin "$GYM_PIN"
   git restore --source="$GYM_PIN" -- . ':(exclude)nemotron_recipes' || exit 1
-  echo "pinned Gym to $GYM_PIN (recipes untouched; PIN_GYM=0 to skip; git restore . to undo)"
+  echo "pinned Gym to $GYM_PIN (recipes untouched; set PIN_GYM=0 to skip; git restore . to undo)"
 fi
 
 gym eval prepare --benchmark gdpval
 
 gym eval run \
   --benchmark gdpval \
-  --model-type vllm_model \
+  --model-type "$MODEL_TYPE" \
   --split benchmark \
   ${RESUME:+--resume} \
   --output "${OUT:-./results/gdpval}/evaluator_rollouts.jsonl" \
@@ -130,9 +141,7 @@ gym eval run \
   "++$JUDGE.max_concurrent_requests=10" \
   ${PARALLEL:+"++$STIR.concurrency=$PARALLEL"} \
   ${MODE_OVR[@]+"${MODE_OVR[@]}"} \
-  "++$POLICY.chat_template_kwargs={enable_thinking: true}" \
-  "++$POLICY.extra_body={skip_special_tokens: false}" \
-  "++$POLICY.sequential_reasoning_allowed=false" \
+  "${MODEL_OVR[@]}" \
   "++overwrite_metrics_conflicts=true" \
   ${LIMIT:+--limit "$LIMIT"} \
   ${PARALLEL:+--concurrency "$PARALLEL"}

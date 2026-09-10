@@ -1,0 +1,115 @@
+#!/usr/bin/env bash
+# SPDX-FileCopyrightText: Copyright (c) 2026, NVIDIA CORPORATION. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+set -euo pipefail
+
+usage() {
+  cat <<'USAGE'
+Usage: ./gdpval [options]
+
+Run this repository's GDPval recipe from the repository root.
+
+Options:
+  --limit N             Run only N tasks (for example: --limit 1)
+  --out DIR             Output directory (default: ./results/gdpval)
+  --parallel N          Evaluator and agent concurrency
+  --model-type TYPE     Gym response model type (default: vllm_model)
+  --judge-only          Re-score existing deliverables without running the agent
+  --rubric              Score against GDPval rubrics (default)
+  --comparison DIR      Compare against rated reference deliverables in DIR
+  --resume              Resume an interrupted run
+  --pin-gym             Opt in to NVIDIA's pinned Gym revision reproduction
+  -h, --help            Show this help
+
+The model endpoint and model ID remain configured through env.yaml.
+USAGE
+}
+
+require_value() {
+  local option="$1"
+  local value="${2-}"
+  if [[ -z "$value" ]]; then
+    echo "$option requires a value" >&2
+    exit 2
+  fi
+}
+
+while (( $# )); do
+  case "$1" in
+    --limit)
+      require_value "$1" "${2-}"
+      export LIMIT="$2"
+      shift 2
+      ;;
+    --out)
+      require_value "$1" "${2-}"
+      export OUT="$2"
+      shift 2
+      ;;
+    --parallel)
+      require_value "$1" "${2-}"
+      export PARALLEL="$2"
+      shift 2
+      ;;
+    --model-type)
+      require_value "$1" "${2-}"
+      export GDPVAL_MODEL_TYPE="$2"
+      shift 2
+      ;;
+    --judge-only)
+      export JUDGE_ONLY=true
+      shift
+      ;;
+    --rubric)
+      export GDPVAL_REWARD_MODE=rubric
+      shift
+      ;;
+    --comparison)
+      require_value "$1" "${2-}"
+      export GDPVAL_REWARD_MODE=comparison
+      export GDPVAL_REFS="$2"
+      shift 2
+      ;;
+    --resume)
+      export RESUME=1
+      shift
+      ;;
+    --pin-gym)
+      export PIN_GYM=1
+      shift
+      ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    *)
+      echo "unknown option: $1" >&2
+      usage >&2
+      exit 2
+      ;;
+  esac
+done
+
+ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+RECIPE="$ROOT/nemotron_recipes/lightning-3.5/instruct/gym/gdpval/gdpval.sh"
+
+if [[ ! -f "$RECIPE" ]]; then
+  echo "GDPval recipe not found: $RECIPE" >&2
+  exit 1
+fi
+
+cd "$ROOT"
+exec bash "$RECIPE"
