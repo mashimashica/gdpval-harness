@@ -55,9 +55,13 @@ class CodexJudgeExecutor(JudgeExecutor):
             "--skip-git-repo-check",
             "--ignore-user-config",
             "-c",
+            'forced_login_method="chatgpt"',
+            "-c",
             'approval_policy="never"',
             "-c",
             "shell_environment_policy.ignore_default_excludes=false",
+            "-c",
+            'web_search="disabled"',
         ]
         if request.model:
             command.extend(["--model", request.model])
@@ -124,8 +128,10 @@ class CodexJudgeExecutor(JudgeExecutor):
             stderr_path=stderr_path,
             metadata={
                 "sandbox": "read-only",
-                "network_policy": "Codex read-only sandbox defaults",
+                "network_policy": "sandbox read-only + web_search disabled",
+                "web_search": "disabled",
                 "cloud_execution": False,
+                "forced_login_method": "chatgpt",
                 "parse_error": parse_error,
             },
         )
