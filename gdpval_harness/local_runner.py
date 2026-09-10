@@ -21,6 +21,7 @@ BENCHMARK_JSONL = Path(
     os.getenv("GDPVAL_BENCHMARK_JSONL", ROOT / "benchmarks" / "gdpval" / "data" / "gdpval_benchmark.jsonl")
 )
 PREPARE_SCRIPT = Path(os.getenv("GDPVAL_PREPARE_SCRIPT", ROOT / "benchmarks" / "gdpval" / "prepare.py"))
+_TERMINAL_SUCCESS = {ExecutionStatus.COMPLETED, ExecutionStatus.NO_DELIVERABLE}
 
 
 def _truthy(name: str) -> bool:
@@ -43,7 +44,20 @@ def _ensure_dataset() -> None:
         raise RuntimeError("failed to prepare GDPval benchmark data")
 
 
-def _load_tasks(limit: int | None) -> list[TaskSpec]:
+def _parse_sequence(value: object) -> tuple[str, ...]:
+    if value is None:
+        return ()
+    if isinstance(value, str):
+        try:
+            value = json.loads(value)
+        except json.JSONDecodeError:
+            return (value,)
+    if isinstance(value, list):
+        return tuple(str(item) for item in value)
+    return ()
+
+
+def _load_tasks(limit: int) -> list[TaskSpec]:
     tasks: list[TaskSpec] = []
     with BENCHMARK_JSONL.open(encoding="utf-8") as handle:
         for line in handle:
@@ -54,27 +68,49 @@ def _load_tasks(limit: int | None) -> list[TaskSpec]:
                 TaskSpec(
                     task_id=str(row["task_id"]),
                     prompt=str(row["prompt"]),
-                    reference_files=tuple(row.get("reference_files") or ()),
-                    reference_file_urls=tuple(row.get("reference_file_urls") or ()),
+                    reference_files=_parse_sequence(row.get("reference_files")),
+                    reference_file_urls=_parse_sequence(row.get("reference_file_urls")),
                     sector=str(row.get("sector") or ""),
                     occupation=str(row.get("occupation") or ""),
                 )
             )
-            if limit is not None and len(tasks) >= limit:
+            if len(tasks) >= limit:
                 break
+    if not tasks:
+        raise RuntimeError(f"no GDPval tasks found in {BENCHMARK_JSONL}")
     return tasks
 
 
+def _is_inside(root: Path, path: Path) -> bool:
+    try:
+        path.resolve().relative_to(root.resolve())
+        return True
+    except ValueError:
+        return False
+
+
 def _materialize_reference_files(task: TaskSpec, workspace: Path) -> list[str]:
-    if not task.reference_files or not task.reference_file_urls:
+    if not task.reference_files and not task.reference_file_urls:
         return []
+    if len(task.reference_files) != len(task.reference_file_urls):
+        raise RuntimeError(f"task {task.task_id}: reference file/url count mismatch")
+
     from responses_api_agents.stirrup_agent.tasks.gdpval import _download_reference_files
 
-    return _download_reference_files(
+    downloaded = _download_reference_files(
         list(task.reference_files),
         list(task.reference_file_urls),
         workspace,
     )
+    if len(downloaded) != len(task.reference_files):
+        raise RuntimeError(
+            f"task {task.task_id}: materialized {len(downloaded)}/{len(task.reference_files)} reference files"
+        )
+    for relative in downloaded:
+        target = workspace / relative
+        if not _is_inside(workspace, target) or not target.is_file():
+            raise RuntimeError(f"task {task.task_id}: unsafe or missing materialized reference path: {relative}")
+    return downloaded
 
 
 def _reference_listing(workspace: Path) -> str:
@@ -95,8 +131,9 @@ Reference files, when provided, are under the current workspace:
 {_reference_listing(workspace)}
 
 Final deliverables contract:
-- Put every file that should be submitted for evaluation directly under ./deliverables/.
+- Put every file that should be submitted for evaluation under ./deliverables/.
 - Create ./deliverables/ if needed.
+- Nested files and directories under ./deliverables/ are allowed.
 - Keep scratch files, logs, caches, helper scripts, and executor metadata out of ./deliverables/.
 - Do not modify the reference_files directory.
 - Network policy for model-generated tools: {network_policy}.
@@ -115,20 +152,36 @@ def _prepare_layout(out_dir: Path, task: TaskSpec) -> TaskLayout:
     return layout
 
 
+def _copy_tree_files(source: Path, target: Path) -> list[str]:
+    target.mkdir(parents=True, exist_ok=True)
+    copied: list[str] = []
+    if not source.is_dir():
+        return copied
+    for path in sorted(source.rglob("*")):
+        relative = path.relative_to(source)
+        if path.is_symlink():
+            raise RuntimeError(f"deliverable symlink is not allowed: {relative}")
+        if path.is_dir():
+            (target / relative).mkdir(parents=True, exist_ok=True)
+            continue
+        if path.is_file():
+            destination = target / relative
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(path, destination)
+            copied.append(str(relative))
+    return copied
+
+
 def _copy_final_deliverables(layout: TaskLayout, result: ExecutionResult) -> list[str]:
     shutil.rmtree(layout.judge_deliverables, ignore_errors=True)
     layout.judge_deliverables.mkdir(parents=True, exist_ok=True)
-    copied: list[str] = []
-    for path in sorted(layout.workspace_deliverables.iterdir()):
-        if path.is_file():
-            shutil.copy2(path, layout.judge_deliverables / path.name)
-            copied.append(path.name)
+    copied = _copy_tree_files(layout.workspace_deliverables, layout.judge_deliverables)
 
     ref_root = layout.workspace / "reference_files"
     if ref_root.is_dir():
-        shutil.copytree(ref_root, layout.judge_deliverables / "reference_files", dirs_exist_ok=True)
+        _copy_tree_files(ref_root, layout.judge_deliverables / "reference_files")
 
-    if result.status in {ExecutionStatus.COMPLETED, ExecutionStatus.NO_DELIVERABLE}:
+    if result.status in _TERMINAL_SUCCESS:
         finish = {
             "executor": result.executor,
             "status": result.status.value,
@@ -172,19 +225,62 @@ def _already_completed(layout: TaskLayout) -> bool:
         status = json.loads(metadata_path.read_text(encoding="utf-8")).get("execution_status")
     except (OSError, json.JSONDecodeError):
         return False
-    return status == ExecutionStatus.COMPLETED.value
+    return status in {item.value for item in _TERMINAL_SUCCESS}
 
 
-def preflight(executor_name: str, out_dir: Path) -> tuple[bool, dict[str, object]]:
+def _parse_limit() -> int:
+    raw = os.getenv("LIMIT")
+    if not raw:
+        raise ValueError("subscription-backed executors require an explicit --limit")
+    try:
+        value = int(raw)
+    except ValueError as exc:
+        raise ValueError("--limit must be an integer") from exc
+    if value <= 0:
+        raise ValueError("--limit must be positive")
+    return value
+
+
+def _parse_timeout() -> float:
+    raw = os.getenv("GDPVAL_EXECUTOR_TIMEOUT")
+    if not raw:
+        return 12600.0
+    try:
+        value = float(raw)
+    except ValueError as exc:
+        raise ValueError("--executor-timeout must be numeric") from exc
+    if value <= 0:
+        raise ValueError("--executor-timeout must be positive")
+    return value
+
+
+def preflight(executor_name: str, out_dir: Path, *, for_run: bool) -> tuple[bool, dict[str, object]]:
     executor = _executor(executor_name)
     result = executor.preflight()
     details = list(result.details)
+    ok = result.ok
 
-    if not PREPARE_SCRIPT.is_file():
-        details.append(f"missing GDPval prepare script: {PREPARE_SCRIPT}")
+    if not BENCHMARK_JSONL.is_file() and not PREPARE_SCRIPT.is_file():
+        details.append(f"GDPval benchmark data is absent and prepare script is missing: {PREPARE_SCRIPT}")
         ok = False
-    else:
-        ok = result.ok
+
+    parallel = os.getenv("PARALLEL", "1")
+    if parallel not in {"", "1"}:
+        details.append("local subscription executors currently require --parallel 1")
+        ok = False
+
+    try:
+        _parse_timeout()
+    except ValueError as exc:
+        details.append(str(exc))
+        ok = False
+
+    if for_run:
+        try:
+            _parse_limit()
+        except ValueError as exc:
+            details.append(str(exc))
+            ok = False
 
     try:
         probe = out_dir / ".gdpval-write-probe"
@@ -198,7 +294,7 @@ def preflight(executor_name: str, out_dir: Path) -> tuple[bool, dict[str, object
     details.append(
         "benchmark data present"
         if BENCHMARK_JSONL.is_file()
-        else "benchmark JSONL is not prepared yet; the run command will invoke the existing GDPval prepare script"
+        else "benchmark JSONL is not prepared yet; run will invoke the existing GDPval prepare script"
     )
     return ok, {
         "executor": executor_name,
@@ -219,28 +315,26 @@ def _write_run_metadata(out_dir: Path, preflight_payload: dict[str, object]) -> 
     env["GDPVAL_EXECUTOR_WORKSPACE_ISOLATION"] = "per-task-directory"
     env["GDPVAL_EXECUTOR_NETWORK"] = os.getenv("GDPVAL_EXECUTOR_NETWORK", "disabled")
     if preflight_payload["executor"] == "codex":
-        env["GDPVAL_EXECUTOR_TOOL_PERMISSION_MODE"] = "workspace-write"
+        env["GDPVAL_EXECUTOR_TOOL_PERMISSION_MODE"] = "workspace-write + approval_policy=never"
     subprocess.run([sys.executable, str(ROOT / "scripts" / "gdpval_run_metadata.py")], cwd=ROOT, env=env, check=True)
 
 
 def run() -> int:
     executor_name = os.getenv("GDPVAL_EXECUTOR", "codex")
     out_dir = Path(os.getenv("OUT", "./results/gdpval")).resolve()
-    ok, preflight_payload = preflight(executor_name, out_dir)
+    ok, preflight_payload = preflight(executor_name, out_dir, for_run=True)
     for detail in preflight_payload["details"]:
         print(f"gdpval[{executor_name}]: {detail}", file=sys.stderr)
     if not ok:
         print(f"gdpval[{executor_name}]: preflight failed", file=sys.stderr)
-        return 1
+        return 2
 
     if os.getenv("GDPVAL_WRITE_METADATA", "1") != "0":
         _write_run_metadata(out_dir, preflight_payload)
 
     _ensure_dataset()
-    limit_raw = os.getenv("LIMIT")
-    limit = int(limit_raw) if limit_raw else None
-    timeout_raw = os.getenv("GDPVAL_EXECUTOR_TIMEOUT")
-    timeout = float(timeout_raw) if timeout_raw else 12600.0
+    limit = _parse_limit()
+    timeout = _parse_timeout()
     resume = _truthy("RESUME")
     executor = _executor(executor_name)
     network_policy = os.getenv("GDPVAL_EXECUTOR_NETWORK", "disabled")
@@ -249,30 +343,31 @@ def run() -> int:
     for task in _load_tasks(limit):
         layout = task_layout(out_dir, task.task_id)
         if resume and _already_completed(layout):
-            print(f"gdpval[{executor_name}]: skip completed task {task.task_id}", file=sys.stderr)
+            print(f"gdpval[{executor_name}]: skip terminal task {task.task_id}", file=sys.stderr)
             continue
 
         layout = _prepare_layout(out_dir, task)
-        _materialize_reference_files(task, layout.workspace)
-        prompt_task = TaskSpec(
-            task_id=task.task_id,
-            prompt=build_task_prompt(task, layout.workspace, network_policy=network_policy),
-            reference_files=task.reference_files,
-            reference_file_urls=task.reference_file_urls,
-            sector=task.sector,
-            occupation=task.occupation,
-        )
-        request = ExecutionRequest(
-            task=prompt_task,
-            workspace=layout.workspace,
-            deliverables_dir=layout.workspace_deliverables,
-            executor_dir=layout.executor_dir,
-            model=os.getenv("GDPVAL_MODEL"),
-            timeout_seconds=timeout,
-            environment=os.environ.copy(),
-        )
         try:
+            _materialize_reference_files(task, layout.workspace)
+            prompt_task = TaskSpec(
+                task_id=task.task_id,
+                prompt=build_task_prompt(task, layout.workspace, network_policy=network_policy),
+                reference_files=task.reference_files,
+                reference_file_urls=task.reference_file_urls,
+                sector=task.sector,
+                occupation=task.occupation,
+            )
+            request = ExecutionRequest(
+                task=prompt_task,
+                workspace=layout.workspace,
+                deliverables_dir=layout.workspace_deliverables,
+                executor_dir=layout.executor_dir,
+                model=os.getenv("GDPVAL_MODEL"),
+                timeout_seconds=timeout,
+                environment=os.environ.copy(),
+            )
             result = executor.execute(request)
+            copied = _copy_final_deliverables(layout, result)
         except KeyboardInterrupt:
             interrupted = {
                 "task_id": task.task_id,
@@ -283,15 +378,28 @@ def run() -> int:
                 json.dumps(interrupted, indent=2, sort_keys=True) + "\n",
                 encoding="utf-8",
             )
-            raise
+            return 130
+        except Exception as exc:
+            failures += 1
+            error = {
+                "task_id": task.task_id,
+                "execution_status": ExecutionStatus.FAILED.value,
+                "executor": executor_name,
+                "harness_error": str(exc),
+            }
+            (layout.executor_dir / "metadata.json").write_text(
+                json.dumps(error, indent=2, sort_keys=True) + "\n",
+                encoding="utf-8",
+            )
+            print(f"gdpval[{executor_name}]: task {task.task_id}: harness failure: {exc}", file=sys.stderr)
+            continue
 
-        copied = _copy_final_deliverables(layout, result)
         _write_executor_metadata(layout, result, copied)
         print(
             f"gdpval[{executor_name}]: task {task.task_id}: {result.status.value} ({len(copied)} deliverable(s))",
             file=sys.stderr,
         )
-        if result.status != ExecutionStatus.COMPLETED:
+        if result.status not in _TERMINAL_SUCCESS:
             failures += 1
 
     summary = {"executor": executor_name, "failed_tasks": failures}
@@ -302,7 +410,7 @@ def run() -> int:
 def check() -> int:
     executor_name = os.getenv("GDPVAL_EXECUTOR", "codex")
     out_dir = Path(os.getenv("OUT", "./results/gdpval")).resolve()
-    ok, payload = preflight(executor_name, out_dir)
+    ok, payload = preflight(executor_name, out_dir, for_run=False)
     print(json.dumps(payload, indent=2, sort_keys=True))
     return 0 if ok else 1
 
