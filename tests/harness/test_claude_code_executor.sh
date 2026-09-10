@@ -44,7 +44,7 @@ case "${1-}" in
     cat >"${FAKE_CLAUDE_PROMPT_LOG:?}"
     mkdir -p "$PWD/deliverables/nested"
     printf 'fake claude deliverable\n' >"$PWD/deliverables/nested/result.txt"
-    printf '{"type":"result","subtype":"success","is_error":false}\n'
+    printf '{"type":"result","subtype":"success","is_error":false}\n\377'
     exit 0
     ;;
 esac
@@ -88,6 +88,12 @@ grep -q 'failIfUnavailable' "$args_log"
 grep -q 'strictAllowlist' "$args_log"
 grep -q '"auth_mode": "claude-subscription"' "$out/tasks/task-claude/executor/metadata.json"
 grep -q './deliverables/' "$prompt_log"
+python3 - "$out/tasks/task-claude/executor/stdout.log" <<'PY'
+from pathlib import Path
+import sys
+text = Path(sys.argv[1]).read_text(encoding="utf-8")
+assert "\ufffd" in text, text
+PY
 if grep -R -q 'must-not-leak\|token-must-not-leak\|api.example.invalid' "$out"; then
   echo "secret or API routing value leaked into Claude run output" >&2
   exit 1
