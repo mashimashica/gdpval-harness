@@ -30,6 +30,10 @@ Options:
   --model-type TYPE     Gym response model type (default: vllm_model)
   --model MODEL         Override the policy model ID from env.yaml
   --base-url URL        Override the policy model base URL from env.yaml
+  --judge-panel MODE    Judge mode: aa-v2 (default) or single
+  --judge-model MODEL   Model ID for single-judge mode
+  --judge-base-url URL  Override the judge gateway base URL
+  --judge-seed N        Seed deterministic judge sampling
   --judge-only          Re-score existing deliverables without running the agent
   --rubric              Score against GDPval rubrics (default)
   --comparison DIR      Compare against rated reference deliverables in DIR
@@ -88,6 +92,26 @@ while (( $# )); do
     --base-url)
       require_value "$1" "${2-}"
       export GDPVAL_BASE_URL="$2"
+      shift 2
+      ;;
+    --judge-panel)
+      require_value "$1" "${2-}"
+      export GDPVAL_JUDGE_PANEL="$2"
+      shift 2
+      ;;
+    --judge-model)
+      require_value "$1" "${2-}"
+      export GDPVAL_JUDGE_MODEL="$2"
+      shift 2
+      ;;
+    --judge-base-url)
+      require_value "$1" "${2-}"
+      export GDPVAL_JUDGE_BASE_URL="$2"
+      shift 2
+      ;;
+    --judge-seed)
+      require_value "$1" "${2-}"
+      export JUDGE_SAMPLING_SEED="$2"
       shift 2
       ;;
     --judge-only)
@@ -160,6 +184,15 @@ cd "$ROOT"
 source "$PROVIDERS"
 if [[ -n "${GDPVAL_PROVIDER:-}" ]]; then
   gdpval_apply_provider "$GDPVAL_PROVIDER"
+fi
+if [[ -n "${GDPVAL_JUDGE_API_KEY:-}" ]]; then
+  export JUDGE_API_KEY="$GDPVAL_JUDGE_API_KEY"
+fi
+if [[ -n "${GDPVAL_JUDGE_BASE_URL:-}" ]]; then
+  export JUDGE_BASE_URL="$GDPVAL_JUDGE_BASE_URL"
+fi
+if [[ -n "${GDPVAL_JUDGE_MODEL:-}" ]]; then
+  export JUDGE_MODEL_NAME="$GDPVAL_JUDGE_MODEL"
 fi
 "$PREFLIGHT"
 
