@@ -35,6 +35,7 @@ Options:
   --resume              Resume an interrupted run
   --pin-gym             Opt in to NVIDIA's pinned Gym revision reproduction
   --check               Validate local prerequisites and exit without running GDPval
+  --no-metadata         Do not write run-metadata.json before execution
   -h, --help            Show this help
 
 Set GDPVAL_API_KEY to override only the policy-model API key without putting
@@ -109,6 +110,10 @@ while (( $# )); do
       export GDPVAL_CHECK_ONLY=1
       shift
       ;;
+    --no-metadata)
+      export GDPVAL_WRITE_METADATA=0
+      shift
+      ;;
     -h|--help)
       usage
       exit 0
@@ -123,10 +128,15 @@ done
 
 ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 PREFLIGHT="$ROOT/scripts/gdpval_preflight.sh"
+METADATA="$ROOT/scripts/gdpval_run_metadata.py"
 RECIPE="$ROOT/nemotron_recipes/lightning-3.5/instruct/gym/gdpval/gdpval.sh"
 
 if [[ ! -x "$PREFLIGHT" ]]; then
   echo "GDPval preflight helper not found or not executable: $PREFLIGHT" >&2
+  exit 1
+fi
+if [[ ! -f "$METADATA" ]]; then
+  echo "GDPval metadata helper not found: $METADATA" >&2
   exit 1
 fi
 if [[ ! -f "$RECIPE" ]]; then
@@ -139,6 +149,10 @@ cd "$ROOT"
 
 if [[ "${GDPVAL_CHECK_ONLY:-0}" != 0 ]]; then
   exit 0
+fi
+
+if [[ "${GDPVAL_WRITE_METADATA:-1}" != 0 ]]; then
+  python3 "$METADATA"
 fi
 
 exec bash "$RECIPE"
