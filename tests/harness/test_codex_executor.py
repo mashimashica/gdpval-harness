@@ -8,7 +8,7 @@ import unittest
 from pathlib import Path
 
 from gdpval_harness.executors.base import ExecutionRequest, TaskSpec
-from gdpval_harness.executors.codex import CodexExecutor
+from gdpval_harness.executors.codex import CodexExecutor, subscription_environment
 
 
 class CodexExecutorTests(unittest.TestCase):
@@ -28,10 +28,14 @@ class CodexExecutorTests(unittest.TestCase):
             self.assertIn("--json", command)
             self.assertIn("--ignore-user-config", command)
             self.assertIn("--skip-git-repo-check", command)
+            self.assertIn("--color", command)
             self.assertIn("workspace-write", command)
+            self.assertIn('approval_policy="never"', command)
             self.assertIn("sandbox_workspace_write.network_access=false", command)
-            self.assertNotIn("--cloud", command)
+            self.assertIn("shell_environment_policy.ignore_default_excludes=false", command)
+            self.assertNotIn("cloud", command)
             self.assertNotIn("--yolo", command)
+            self.assertNotIn("work", command)
             self.assertEqual(command[-1], "-")
 
     def test_network_is_explicit(self) -> None:
@@ -45,6 +49,19 @@ class CodexExecutorTests(unittest.TestCase):
             )
             command = CodexExecutor(network_enabled=True).build_command(request)
             self.assertIn("sandbox_workspace_write.network_access=true", command)
+
+    def test_subscription_environment_removes_api_credentials(self) -> None:
+        env = subscription_environment(
+            {
+                "PATH": "/bin",
+                "OPENAI_API_KEY": "secret",
+                "CODEX_ACCESS_TOKEN": "secret-token",
+                "KEEP_ME": "yes",
+            }
+        )
+        self.assertNotIn("OPENAI_API_KEY", env)
+        self.assertNotIn("CODEX_ACCESS_TOKEN", env)
+        self.assertEqual(env["KEEP_ME"], "yes")
 
 
 if __name__ == "__main__":
