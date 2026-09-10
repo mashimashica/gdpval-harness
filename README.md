@@ -1,17 +1,19 @@
 # gdpval-harness
 
-A one-command harness for running and evaluating GDPval with configurable policy models, judge configurations, and pairwise comparisons.
+A reproducible harness for running GDPval with configurable agent executors, model providers, and judges.
 
-This repository is a focused fork of [NVIDIA NeMo Gym](https://github.com/NVIDIA-NeMo/Gym). It keeps the upstream GDPval execution, Stirrup agent, artifact handling, judge panel, and Elo machinery intact while exposing a smaller command-line surface for reproducible experiments.
+This repository is a focused fork of [NVIDIA NeMo Gym](https://github.com/NVIDIA-NeMo/Gym). It keeps the existing Stirrup, artifact handling, GDPval judge panel, pairwise comparison, and Elo machinery while adding local subscription/account-backed execution for repeated experiments.
 
-## What it supports
+## Execution modes
 
-- run GDPval tasks against local or hosted models;
-- use OpenAI, Gemini, OpenRouter, LiteLLM, vLLM, or a generic OpenAI-compatible endpoint as the policy backend;
-- score with the GDPval rubric or the existing multi-judge panel;
-- reproduce the pinned GDPval-AA v2 reference-scale comparison path;
-- blind-compare two existing deliverable sets without rerunning the policy model; and
-- record non-secret run metadata for reproducibility.
+| Mode | Policy execution | Judge | Intended use |
+| --- | --- | --- | --- |
+| AA-v2-compatible reproduction | NeMo Gym / Stirrup + model API | existing AA-v2-style API panel | reference-scale benchmarking |
+| Local experiment | Codex CLI / Claude Code / Cursor Agent CLI | separate | low-cost repeated artifact generation |
+| Local blind comparison | existing artifact sets | Codex CLI or Claude Code | low-cost A/B experiments |
+| Human validation | any artifact sets | human | HITL calibration and final review |
+
+Local execution or local judging does **not** produce an official GDPval-AA v2 score.
 
 ## CLI
 
@@ -20,133 +22,154 @@ This repository is a focused fork of [NVIDIA NeMo Gym](https://github.com/NVIDIA
 ./gdpval check [options]
 ./gdpval aa-v2 --refs DIR [options]
 ./gdpval compare-runs --a DIR --b DIR [options]
+./gdpval executors
 ./gdpval providers
 ```
 
-`run` is optional, so the original short form still works:
+`executor` is the agent runtime that performs the task. `provider` is the model backend used only by `executor=stirrup`. `judge` / `judge-executor` is independent of both.
+
+## Subscription/account-backed local executors
+
+List supported runtimes:
 
 ```bash
-./gdpval --limit 1
+./gdpval executors
 ```
 
-## Setup
+Current local executors:
 
-Use the normal NeMo Gym environment and GDPval sandbox. The harness currently embeds rather than reimplements those components.
+- `codex`: local Codex CLI with ChatGPT account authentication only;
+- `claude-code`: local Claude Code with first-party Claude subscription authentication only;
+- `cursor`: local Cursor Agent CLI with stored Cursor account authentication;
+- `stirrup`: existing NeMo Gym / Stirrup API-backed path.
 
-1. Install/sync the NeMo Gym Python environment from this repository.
-2. Copy the existing GDPval recipe configuration to the repository root as `env.yaml`, or provide equivalent CLI/environment overrides.
-3. For a policy rollout, set `GDPVAL_CONTAINER_PATH` to the GDPval Apptainer image and provide `TAVILY_API_KEY`.
-4. Configure judge access. The default `aa-v2` panel expects one gateway that can route the configured GPT-5.5, Gemini 3.1 Pro, and Claude Opus 4.8 judge model IDs. Use `--judge-panel single` when you have only one judge endpoint.
-
-Check the environment without starting an evaluation:
+Check authentication and local prerequisites without issuing a model task:
 
 ```bash
-./gdpval check --provider openai --model '<model-id>'
+./gdpval check --executor codex
+./gdpval check --executor claude-code
+./gdpval check --executor cursor
 ```
 
-`check` exits before dataset preparation, model calls, and the optional source pin.
-
-## Run a model
-
-OpenAI:
+Run a single GDPval task:
 
 ```bash
-OPENAI_API_KEY='<key>' \
-GDPVAL_JUDGE_API_KEY='<judge-key>' \
+./gdpval run --executor codex --limit 1 --out runs/codex-smoke
+./gdpval run --executor claude-code --limit 1 --out runs/claude-smoke
+./gdpval run --executor cursor --limit 1 --out runs/cursor-smoke
+```
+
+An explicit `--limit` is required for subscription/account-backed executors and execution is serial by default. Local adapters remove documented API credential/routing environment variables and fail closed rather than silently falling back to API billing. They do not intentionally invoke vendor cloud-agent execution paths.
+
+The local workspace is isolated per task. Reference files are materialized before execution, and only files placed by the agent under `workspace/deliverables/` are copied into the judge-compatible GDPval deliverables tree.
+
+See [SUBSCRIPTION-EXECUTORS.md](SUBSCRIPTION-EXECUTORS.md) for authentication, sandbox, network, usage, and vendor-specific details.
+
+## Low-cost blind A/B comparison
+
+Generate two conditions with the same executor/model/runtime, then judge the resulting artifacts separately:
+
+```bash
 ./gdpval run \
-  --provider openai \
-  --model '<model-id>' \
-  --judge-panel single \
-  --judge-model '<judge-model-id>' \
-  --judge-base-url '<judge-base-url>' \
-  --limit 1
+  --executor codex \
+  --limit 10 \
+  --out runs/plain
+
+./gdpval run \
+  --executor codex \
+  --limit 10 \
+  --out runs/intervention
+
+./gdpval compare-runs \
+  --a runs/plain/deliverables \
+  --b runs/intervention/deliverables \
+  --label-a plain \
+  --label-b intervention \
+  --judge-executor claude-code \
+  --judge-trials 2 \
+  --limit 10 \
+  --out runs/comparison
 ```
 
-Gemini:
+`--judge-executor` currently supports `codex` and `claude-code`. It creates a fresh anonymous judge workspace for every task/trial, validates that candidate task sets and reference files match, removes executor bookkeeping, alternates A/B positions, and reports win/tie/loss results.
 
-```bash
-GEMINI_API_KEY='<key>' \
-./gdpval run --provider gemini --model '<model-id>' --limit 1
-```
+Using the same executor/model family for generation and judging can introduce evaluator dependence. The comparison summary records when the candidate run metadata identifies the same executor as the local judge. Cross-family judging or human validation is recommended for stronger claims.
 
-Claude can currently be used as the policy model through an OpenAI-compatible gateway such as OpenRouter or LiteLLM. This harness does not add a new native Anthropic Messages API model server.
+Local judge results always identify themselves as non-AA-v2 results.
 
-List the built-in policy presets:
+## GDPval-AA v2-compatible reproduction
 
-```bash
-./gdpval providers
-```
-
-Explicit `--model-type`, `--base-url`, and `GDPVAL_API_KEY` values take precedence over provider defaults.
-
-## GDPval-AA v2-compatible comparison
-
-Place rated reference deliverables under one directory using the names in [`config/gdpval-aa-v2-references.tsv`](config/gdpval-aa-v2-references.tsv), then run:
+The existing reproduction path remains Stirrup-based:
 
 ```bash
 ./gdpval aa-v2 \
   --refs ./refs \
+  --executor stirrup \
   --provider openai \
   --model '<model-id>'
 ```
 
-The reference Elo anchors are deliberately pinned. With two or more available references, the upstream adaptive flow first places the candidate on 45 tasks and then spends the full task budget against the nearest up to four references.
+The command explicitly rejects local policy executors and local judge executors. It retains the existing API judge panel and the pinned reference Elo manifest at [`config/gdpval-aa-v2-references.tsv`](config/gdpval-aa-v2-references.tsv).
 
-You can supply another rated reference set with:
+A locally produced rating remains an independent reproduction result, not an official Artificial Analysis score.
 
-```bash
-./gdpval run \
-  --comparison ./refs \
-  --reference-manifest ./my-references.tsv
-```
+## Stirrup / provider-backed execution
 
-A locally produced rating is not an official Artificial Analysis score. The profile reproduces the public/open implementation path as closely as this fork permits, but provider behavior, serving details, and other non-public conditions can differ.
-
-## Compare two experiment conditions
-
-If the same GDPval tasks have already been executed under two conditions, compare the artifacts directly:
+The original NeMo Gym route remains available for benchmark reproduction and API-backed runs:
 
 ```bash
+OPENAI_API_KEY='<policy-key>' \
 GDPVAL_JUDGE_API_KEY='<judge-key>' \
-./gdpval compare-runs \
-  --a runs/plain/deliverables \
-  --b runs/alps/deliverables \
-  --label-a plain \
-  --label-b alps \
-  --judge-panel single \
-  --judge-model '<judge-model-id>' \
-  --judge-base-url '<judge-base-url>'
+./gdpval run \
+  --executor stirrup \
+  --provider openai \
+  --model '<model-id>' \
+  --limit 1
 ```
 
-This is judge-only: it needs neither the GDPval sandbox nor the search key. The labels are written only to metadata and are not shown to the pairwise judge. The upstream comparison grader alternates submission positions across trials to reduce A/B position bias.
+Available provider presets can be listed with:
 
-Candidate B is assigned an arbitrary Elo of 1000 only so the existing aggregation path can be reused. For two-condition experiments, use pairwise win/tie/loss and preference as the primary result rather than interpreting this as an AA-v2 Elo placement.
+```bash
+./gdpval providers
+```
+
+The Stirrup path retains the GDPval Apptainer sandbox, model-server abstraction, existing judge configuration, and reference/Elo machinery. See [UPSTREAM.md](UPSTREAM.md) for the retained upstream scope.
 
 ## Outputs and reproducibility
 
-A normal run writes under `./results/gdpval` unless `--out` is supplied. The harness records `run-metadata.json` before execution with:
+Local policy runs use this structure:
 
-- repository commit and dirty state;
-- hash of `env.yaml` when present;
-- policy provider/model/backend selection;
-- judge mode and non-secret judge settings;
-- evaluation mode/reference manifest and its hash; and
-- output, concurrency, limit, resume, and pin settings.
-
-API-key values are never written to metadata. Use `--no-metadata` only when this provenance record is intentionally unwanted.
-
-## Reproduction pin
-
-Normal runs never rewrite tracked source files. The NVIDIA recipe's historical source pin remains available explicitly:
-
-```bash
-./gdpval run --pin-gym --limit 1
+```text
+<out>/
+  run-metadata.json
+  executor-summary.json
+  tasks/<task-id>/
+    workspace/
+      reference_files/
+      deliverables/
+    executor/
+      stdout.log
+      stderr.log
+      prompt.txt
+      metadata.json
+  deliverables/task_<task-id>/repeat_0/
 ```
 
-That mode uses `git restore` to reproduce the pinned Gym source revision while leaving `nemotron_recipes` untouched. Use it only on a clean working tree.
+Local blind comparisons additionally write:
 
-## Scope
+```text
+<out>/
+  run-metadata.json
+  local-judge-results.jsonl
+  local-judge-summary.json
+  judge/tasks/<task-id>/trial_<n>/...
+```
 
-The public surface of this fork is GDPval-specific, but the NeMo Gym engine remains embedded because the benchmark currently depends on its environment lifecycle, model servers, Stirrup agent, resources server, artifact conversion, and aggregation code. See [`UPSTREAM.md`](UPSTREAM.md).
+Metadata records non-secret provenance including repository commit, executor/judge executor and versions, invocation/auth modes, selected model, workspace isolation, network/tool policy, timestamps, task/run limits, reference configuration, and exit state. API keys, OAuth/session credentials, and account tokens are not recorded.
 
-The repository is independent and is not an official implementation or service of Artificial Analysis, OpenAI, or NVIDIA.
+## Safety and scope
+
+- Subscription/account-backed execution is not the same as unlimited or zero-cost use. Plan limits, usage pools, rate limits, on-demand billing settings, fair-use policies, and vendor terms still apply.
+- The local machine is not NVIDIA's GDPval Apptainer environment. Local runs are most useful for controlled relative experiments rather than claiming protocol-identical AA-v2 results.
+- `aa-v2` remains the compatibility/reproduction path and is intentionally isolated from local executor shortcuts.
+- The repository is independent and is not an official implementation or service of Artificial Analysis, OpenAI, Anthropic, Cursor, or NVIDIA.

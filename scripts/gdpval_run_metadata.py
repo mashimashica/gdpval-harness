@@ -39,11 +39,13 @@ def main() -> None:
     out_dir.mkdir(parents=True, exist_ok=True)
     metadata_path = out_dir / "run-metadata.json"
 
+    command = os.getenv("GDPVAL_COMMAND", "run")
     status = git_value("status", "--porcelain")
     reference_manifest = os.getenv("GDPVAL_REFERENCE_MANIFEST")
-    executor = os.getenv("GDPVAL_EXECUTOR", "stirrup")
+    executor = None if command == "compare-runs" else os.getenv("GDPVAL_EXECUTOR", "stirrup")
+    judge_executor = os.getenv("GDPVAL_JUDGE_EXECUTOR")
     payload = {
-        "schema_version": 2,
+        "schema_version": 3,
         "created_at": datetime.now(timezone.utc).isoformat(),
         "repository": {
             "commit": git_value("rev-parse", "HEAD"),
@@ -51,20 +53,21 @@ def main() -> None:
         },
         "configuration": {
             "env_yaml_sha256": sha256(root / "env.yaml"),
-            "command": os.getenv("GDPVAL_COMMAND", "run"),
+            "command": command,
             "profile": os.getenv("GDPVAL_PROFILE"),
+            "evaluation_mode": os.getenv("GDPVAL_EVALUATION_MODE"),
             "executor": executor,
-            "executor_timeout_seconds": os.getenv("GDPVAL_EXECUTOR_TIMEOUT"),
-            "executor_max_turns": os.getenv("GDPVAL_EXECUTOR_MAX_TURNS"),
-            "executor_version": os.getenv("GDPVAL_EXECUTOR_VERSION"),
-            "executor_invocation_mode": os.getenv("GDPVAL_EXECUTOR_INVOCATION_MODE"),
-            "executor_auth_mode": os.getenv("GDPVAL_EXECUTOR_AUTH_MODE"),
-            "executor_workspace_isolation": os.getenv("GDPVAL_EXECUTOR_WORKSPACE_ISOLATION"),
-            "executor_network_policy": os.getenv("GDPVAL_EXECUTOR_NETWORK"),
-            "executor_tool_permission_mode": os.getenv("GDPVAL_EXECUTOR_TOOL_PERMISSION_MODE"),
+            "executor_timeout_seconds": os.getenv("GDPVAL_EXECUTOR_TIMEOUT") if executor else None,
+            "executor_max_turns": os.getenv("GDPVAL_EXECUTOR_MAX_TURNS") if executor else None,
+            "executor_version": os.getenv("GDPVAL_EXECUTOR_VERSION") if executor else None,
+            "executor_invocation_mode": os.getenv("GDPVAL_EXECUTOR_INVOCATION_MODE") if executor else None,
+            "executor_auth_mode": os.getenv("GDPVAL_EXECUTOR_AUTH_MODE") if executor else None,
+            "executor_workspace_isolation": os.getenv("GDPVAL_EXECUTOR_WORKSPACE_ISOLATION") if executor else None,
+            "executor_network_policy": os.getenv("GDPVAL_EXECUTOR_NETWORK") if executor else None,
+            "executor_tool_permission_mode": os.getenv("GDPVAL_EXECUTOR_TOOL_PERMISSION_MODE") if executor else None,
             "provider": os.getenv("GDPVAL_PROVIDER") if executor == "stirrup" else None,
             "model_type": os.getenv("GDPVAL_MODEL_TYPE", "vllm_model") if executor == "stirrup" else None,
-            "model": os.getenv("GDPVAL_MODEL"),
+            "model": os.getenv("GDPVAL_MODEL") if executor else None,
             "base_url": os.getenv("GDPVAL_BASE_URL") if executor == "stirrup" else None,
             "policy_api_key_override": bool(os.getenv("GDPVAL_API_KEY")) if executor == "stirrup" else False,
             "reward_mode": os.getenv("GDPVAL_REWARD_MODE", "rubric"),
@@ -76,10 +79,15 @@ def main() -> None:
             "label_b": os.getenv("GDPVAL_LABEL_B"),
             "single_reference_dir": os.getenv("GDPVAL_SINGLE_REFERENCE_DIR"),
             "reference_manifest_sha256": sha256(Path(reference_manifest)) if reference_manifest else None,
-            "judge_panel": os.getenv("GDPVAL_JUDGE_PANEL", "aa-v2"),
+            "judge_executor": judge_executor,
+            "judge_executor_version": os.getenv("GDPVAL_JUDGE_EXECUTOR_VERSION"),
+            "judge_executor_auth_mode": os.getenv("GDPVAL_JUDGE_EXECUTOR_AUTH_MODE"),
+            "judge_trials": os.getenv("GDPVAL_JUDGE_TRIALS"),
+            "judge_timeout_seconds": os.getenv("GDPVAL_JUDGE_TIMEOUT"),
+            "judge_panel": None if judge_executor else os.getenv("GDPVAL_JUDGE_PANEL", "aa-v2"),
             "judge_model": os.getenv("GDPVAL_JUDGE_MODEL"),
-            "judge_base_url": os.getenv("GDPVAL_JUDGE_BASE_URL"),
-            "judge_api_key_override": bool(os.getenv("GDPVAL_JUDGE_API_KEY")),
+            "judge_base_url": None if judge_executor else os.getenv("GDPVAL_JUDGE_BASE_URL"),
+            "judge_api_key_override": False if judge_executor else bool(os.getenv("GDPVAL_JUDGE_API_KEY")),
             "judge_sampling_seed": os.getenv("JUDGE_SAMPLING_SEED", "42"),
             "judge_only": truthy("JUDGE_ONLY"),
             "limit": os.getenv("LIMIT"),

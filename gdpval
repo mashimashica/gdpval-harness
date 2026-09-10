@@ -29,23 +29,26 @@ Usage:
 `run` is the default when the first argument is an option.
 
 Core options:
-  --limit N             Run only N tasks
+  --limit N             Run/judge only N tasks
   --out DIR             Output directory
   --parallel N          Evaluator and agent concurrency
-  --executor NAME       Agent runtime (default: stirrup)
-  --executor-timeout S  Per-task executor wall-clock timeout in seconds
+  --executor NAME       Policy agent runtime (default: stirrup)
+  --executor-timeout S  Per-task policy executor wall-clock timeout
   --executor-network MODE
-                        Local tool network policy: disabled (default) or enabled
-  --provider NAME       Policy-provider preset for executor=stirrup
+                        Local policy tool network: disabled (default) or enabled
+  --provider NAME       Policy provider preset for executor=stirrup
   --model-type TYPE     Gym response model type for executor=stirrup
-  --model MODEL         Policy/executor model ID when supported
+  --model MODEL         Policy/local-executor model ID when supported
   --base-url URL        Policy model base URL for executor=stirrup
 
 Judge options:
-  --judge-panel MODE    aa-v2 (default) or single
-  --judge-model MODEL   Model ID for single-judge mode
-  --judge-base-url URL  Judge gateway base URL
-  --judge-seed N        Deterministic judge-sampling seed
+  --judge-executor NAME Local subscription judge: codex or claude-code
+  --judge-trials N      Local blind judge trials per task (default: 2)
+  --judge-timeout S     Local judge wall-clock timeout per trial (default: 3600)
+  --judge-panel MODE    API judge mode: aa-v2 (default) or single
+  --judge-model MODEL   Judge model ID when selectable
+  --judge-base-url URL  API judge gateway base URL
+  --judge-seed N        Deterministic judge/swap seed
 
 Evaluation options:
   --rubric              Score against GDPval rubrics (default)
@@ -54,7 +57,7 @@ Evaluation options:
                         Reference names and Elo anchors
   --refs DIR            Reference directory for the `aa-v2` command
   --aa-v2 DIR           Legacy alias for `aa-v2 --refs DIR`
-  --judge-only          Re-score existing deliverables
+  --judge-only          Re-score existing deliverables through the API judge path
   --resume              Resume an interrupted run
   --pin-gym             Opt in to NVIDIA's pinned Gym revision
 
@@ -69,10 +72,9 @@ Other:
   --no-metadata         Do not write run-metadata.json
   -h, --help            Show this help
 
-An executor is the agent runtime that performs work. A provider is only the
-model backend used by executor=stirrup. Judge configuration is independent.
-Policy secrets stay in environment variables. `GDPVAL_API_KEY` overrides only
-the Stirrup policy credential. `GDPVAL_JUDGE_API_KEY` overrides only the judge credential.
+Executor, provider, and judge are separate concepts. Local subscription-backed
+judge execution is available only for compare-runs (or check) and is never an
+AA-v2 reproduction score.
 USAGE
 }
 
@@ -107,6 +109,9 @@ while (( $# )); do
     --model-type) require_value "$1" "${2-}"; export GDPVAL_MODEL_TYPE="$2"; shift 2 ;;
     --model) require_value "$1" "${2-}"; export GDPVAL_MODEL="$2"; shift 2 ;;
     --base-url) require_value "$1" "${2-}"; export GDPVAL_BASE_URL="$2"; shift 2 ;;
+    --judge-executor) require_value "$1" "${2-}"; export GDPVAL_JUDGE_EXECUTOR="$2"; shift 2 ;;
+    --judge-trials) require_value "$1" "${2-}"; export GDPVAL_JUDGE_TRIALS="$2"; shift 2 ;;
+    --judge-timeout) require_value "$1" "${2-}"; export GDPVAL_JUDGE_TIMEOUT="$2"; shift 2 ;;
     --judge-panel) require_value "$1" "${2-}"; export GDPVAL_JUDGE_PANEL="$2"; shift 2 ;;
     --judge-model) require_value "$1" "${2-}"; export GDPVAL_JUDGE_MODEL="$2"; shift 2 ;;
     --judge-base-url) require_value "$1" "${2-}"; export GDPVAL_JUDGE_BASE_URL="$2"; shift 2 ;;
@@ -164,16 +169,8 @@ if [[ "${GDPVAL_COMMAND:-run}" == providers ]]; then
   exit 0
 fi
 
-if [[ ! -x "$PREFLIGHT" ]]; then
-  echo "GDPval preflight helper not found or not executable: $PREFLIGHT" >&2
-  exit 1
-fi
-if [[ ! -f "$METADATA" ]]; then
-  echo "GDPval metadata helper not found: $METADATA" >&2
-  exit 1
-fi
-if [[ ! -f "$RECIPE" ]]; then
-  echo "GDPval recipe not found: $RECIPE" >&2
+if [[ ! -x "$PREFLIGHT" || ! -f "$METADATA" || ! -f "$RECIPE" ]]; then
+  echo "GDPval harness support files are incomplete" >&2
   exit 1
 fi
 
@@ -184,13 +181,15 @@ if [[ "${GDPVAL_COMMAND:-run}" == aa-v2 ]]; then
     echo "aa-v2 reproduction requires --executor stirrup" >&2
     exit 2
   fi
+  if [[ -n "${GDPVAL_JUDGE_EXECUTOR:-}" ]]; then
+    echo "aa-v2 reproduction does not accept --judge-executor" >&2
+    exit 2
+  fi
   if [[ -z "${GDPVAL_REFS:-}" ]]; then
     echo "aa-v2 requires --refs DIR" >&2
     exit 2
   fi
-  export GDPVAL_PROFILE=aa-v2
-  export GDPVAL_REWARD_MODE=comparison
-  export GDPVAL_JUDGE_PANEL=aa-v2
+  export GDPVAL_PROFILE=aa-v2 GDPVAL_REWARD_MODE=comparison GDPVAL_JUDGE_PANEL=aa-v2
   export GDPVAL_REFERENCE_MANIFEST="${GDPVAL_REFERENCE_MANIFEST:-$AA_V2_MANIFEST}"
 fi
 
@@ -199,13 +198,29 @@ if [[ "${GDPVAL_COMMAND:-run}" == compare-runs ]]; then
     echo "compare-runs requires both --a and --b" >&2
     exit 2
   fi
-  export JUDGE_ONLY=true
-  export GDPVAL_REWARD_MODE=comparison
-  export PERSIST_DELIVERABLES_DIR="$GDPVAL_RUN_A"
-  export GDPVAL_SINGLE_REFERENCE_DIR="$GDPVAL_RUN_B"
-  export GDPVAL_SINGLE_REFERENCE_ELO="${GDPVAL_SINGLE_REFERENCE_ELO:-1000}"
   export OUT="${OUT:-./results/compare-runs}"
-  unset GDPVAL_PROFILE GDPVAL_REFS GDPVAL_REFERENCE_MANIFEST
+  if [[ -z "${GDPVAL_JUDGE_EXECUTOR:-}" ]]; then
+    export JUDGE_ONLY=true GDPVAL_REWARD_MODE=comparison
+    export PERSIST_DELIVERABLES_DIR="$GDPVAL_RUN_A"
+    export GDPVAL_SINGLE_REFERENCE_DIR="$GDPVAL_RUN_B"
+    export GDPVAL_SINGLE_REFERENCE_ELO="${GDPVAL_SINGLE_REFERENCE_ELO:-1000}"
+    unset GDPVAL_PROFILE GDPVAL_REFS GDPVAL_REFERENCE_MANIFEST
+  fi
+fi
+
+if [[ -n "${GDPVAL_JUDGE_EXECUTOR:-}" ]]; then
+  case "$GDPVAL_JUDGE_EXECUTOR" in
+    codex|claude-code) ;;
+    *) echo "--judge-executor must be codex or claude-code" >&2; exit 2 ;;
+  esac
+  if [[ "${GDPVAL_COMMAND:-run}" == check ]]; then
+    exec python3 -m gdpval_harness.local_judge_runner check
+  fi
+  if [[ "${GDPVAL_COMMAND:-run}" != compare-runs ]]; then
+    echo "--judge-executor is only valid with compare-runs or check" >&2
+    exit 2
+  fi
+  exec python3 -m gdpval_harness.local_judge_runner run
 fi
 
 if [[ -n "${GDPVAL_PROVIDER:-}" ]]; then
@@ -247,7 +262,6 @@ if [[ "$GDPVAL_EXECUTOR" != stirrup ]]; then
 fi
 
 "$PREFLIGHT"
-
 if [[ "${GDPVAL_CHECK_ONLY:-0}" != 0 ]]; then exit 0; fi
 if [[ "${GDPVAL_WRITE_METADATA:-1}" != 0 ]]; then python3 "$METADATA"; fi
 exec bash "$RECIPE"

@@ -17,6 +17,7 @@ grep -q './gdpval aa-v2 --refs DIR' <<<"$help"
 grep -q './gdpval compare-runs --a DIR --b DIR' <<<"$help"
 grep -q './gdpval executors' <<<"$help"
 grep -q -- '--executor NAME' <<<"$help"
+grep -q -- '--judge-executor NAME' <<<"$help"
 
 providers="$(./gdpval providers)"
 grep -q '^openai ' <<<"$providers"
@@ -44,6 +45,10 @@ if ./gdpval aa-v2 --refs /tmp --executor not-real --no-metadata >/dev/null 2>&1;
   echo "aa-v2 unexpectedly accepted a non-Stirrup executor" >&2
   exit 1
 fi
+if ./gdpval aa-v2 --refs /tmp --judge-executor codex --no-metadata >/dev/null 2>&1; then
+  echo "aa-v2 unexpectedly accepted a local judge executor" >&2
+  exit 1
+fi
 
 pycache="$(mktemp -d)"
 trap 'rm -rf "$pycache"' EXIT
@@ -52,6 +57,7 @@ PYTHONPYCACHEPREFIX="$pycache" python3 -m py_compile \
   gdpval_harness/__init__.py \
   gdpval_harness/layout.py \
   gdpval_harness/local_runner.py \
+  gdpval_harness/local_judge_runner.py \
   gdpval_harness/executors/__init__.py \
   gdpval_harness/executors/base.py \
   gdpval_harness/executors/claude_code.py \
@@ -60,10 +66,13 @@ PYTHONPYCACHEPREFIX="$pycache" python3 -m py_compile \
   gdpval_harness/executors/registry.py \
   gdpval_harness/judges/__init__.py \
   gdpval_harness/judges/base.py \
+  gdpval_harness/judges/codex.py \
+  gdpval_harness/judges/claude_code.py \
   gdpval_harness/judges/pairwise.py
 python3 -m unittest discover -s tests/harness -p 'test_*.py'
 bash tests/harness/test_codex_executor.sh
 bash tests/harness/test_claude_code_executor.sh
 bash tests/harness/test_cursor_executor.sh
+bash tests/harness/test_local_judge_executor.sh
 
 printf 'gdpval harness self-test passed\n'
