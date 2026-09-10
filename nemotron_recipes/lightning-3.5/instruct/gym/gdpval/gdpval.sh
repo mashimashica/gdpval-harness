@@ -83,17 +83,9 @@ fi
 # Absolute path required. A comparison run points GDPVAL_REFS at one of these.
 DELIVERABLES="${PERSIST_DELIVERABLES_DIR:-$(realpath -m "${OUT:-./results/gdpval}/deliverables")}"
 
-# Reference ELOs — the Artificial Analysis GDPval-AA v2 ratings the published figures
-# were fitted against. A reference set is a subdirectory of GDPVAL_REFS named after one
-# of these keys; supply as many as you have. Comparing against several opponents of
-# known rating is what puts the result on the published scale — a single opponent only
-# fixes an arbitrary offset.
-#
-# Pinned on purpose, and they no longer match the live board. These anchors define the
-# scale, so refreshing them moves your score off the one the published figures sit on.
-REF_ELOS="deepseek_v4_pro=1307 glm51_fp8=1257 kimi_k26=1191 nemotron3_ultra=1164
-          qwen36_35b=1049 qwen35_397b=962 gptoss_120b=799 gemma4_26b=761
-          qwen3_30b_thinking=308"
+# Comparison anchors live in a manifest so the rating scale is explicit and auditable.
+# The AA-v2 profile points GDPVAL_REFERENCE_MANIFEST at the pinned manifest in config/.
+REFERENCE_MANIFEST="${GDPVAL_REFERENCE_MANIFEST:-config/gdpval-aa-v2-references.tsv}"
 
 MODE="${GDPVAL_REWARD_MODE:-rubric}"
 [ "$MODE" = rubric ] || [ "$MODE" = comparison ] ||
@@ -117,20 +109,31 @@ esac
 MODE_OVR=()   # rubric is the config default and needs nothing added
 if [ "$MODE" = comparison ]; then
   GDPVAL_REFS="${GDPVAL_REFS:?export GDPVAL_REFS (dir of reference deliverables)}"
+  [ -r "$REFERENCE_MANIFEST" ] || {
+    echo "reference manifest not readable: $REFERENCE_MANIFEST" >&2
+    exit 1
+  }
   MODE_OVR=("++$GDR.reward_mode=comparison")
   found=0
+  expected=()
 
-  for kv in $REF_ELOS; do
-    name="${kv%%=*}"
+  while IFS=$'\t ' read -r name elo _; do
+    [ -z "${name:-}" ] && continue
+    [[ "$name" == \#* ]] && continue
+    if [ -z "${elo:-}" ]; then
+      echo "invalid reference manifest row for '$name': missing Elo" >&2
+      exit 1
+    fi
+    expected+=("$name")
     [ -d "$GDPVAL_REFS/$name" ] || continue
     MODE_OVR+=("++$GDR.reference_models.$name.deliverables_dir=$GDPVAL_REFS/$name"
-               "++$GDR.reference_models.$name.elo=${kv##*=}")
+               "++$GDR.reference_models.$name.elo=$elo")
     found=$((found + 1))
-  done
+  done < "$REFERENCE_MANIFEST"
 
   if [ "$found" -eq 0 ]; then
     echo "no reference sets found in $GDPVAL_REFS. Expected subdirectories named:" >&2
-    for kv in $REF_ELOS; do echo "  ${kv%%=*}" >&2; done
+    for name in "${expected[@]}"; do echo "  $name" >&2; done
     exit 1
   fi
 
