@@ -62,7 +62,10 @@ PYTHONPYCACHEPREFIX="$pycache" python3 -m py_compile \
   gdpval_harness/executors/claude_code.py \
   gdpval_harness/executors/codex.py \
   gdpval_harness/executors/cursor.py \
-  gdpval_harness/executors/registry.py
+  gdpval_harness/executors/registry.py \
+  gdpval_harness/judges/__init__.py \
+  gdpval_harness/judges/base.py \
+  gdpval_harness/judges/pairwise.py
 python3 -m unittest discover -s tests/harness -p 'test_*.py'
 bash tests/harness/test_codex_executor.sh
 bash tests/harness/test_claude_code_executor.sh
