@@ -42,15 +42,15 @@ case "${1-}" in
       case "$1" in
         --cd) workspace="$2"; shift 2 ;;
         --output-last-message) final_message="$2"; shift 2 ;;
-        --model|-c|--sandbox) shift 2 ;;
+        --model|-c|--sandbox|--color) shift 2 ;;
         --ephemeral|--json|--skip-git-repo-check|--ignore-user-config) shift ;;
         -) shift; break ;;
         *) shift ;;
       esac
     done
     cat >"${FAKE_CODEX_PROMPT_LOG:?}"
-    mkdir -p "$workspace/deliverables"
-    printf 'fake deliverable\n' >"$workspace/deliverables/result.txt"
+    mkdir -p "$workspace/deliverables/nested"
+    printf 'fake deliverable\n' >"$workspace/deliverables/nested/result.txt"
     printf '{"type":"turn.completed"}\n'
     printf 'done\n' >"$final_message"
     exit 0
@@ -78,21 +78,37 @@ FAKE_CODEX_PROMPT_LOG="$prompt_log" \
 GDPVAL_BENCHMARK_JSONL="$benchmark" \
 ./gdpval run --executor codex --limit 1 --out "$out" --no-metadata
 
-test -f "$out/deliverables/task_task-one/repeat_0/result.txt"
+test -f "$out/deliverables/task_task-one/repeat_0/nested/result.txt"
 test -f "$out/deliverables/task_task-one/repeat_0/finish_params.json"
 test -f "$out/tasks/task-one/executor/stdout.log"
 test -f "$out/tasks/task-one/executor/stderr.log"
+test -f "$out/tasks/task-one/executor/prompt.txt"
 test -f "$out/tasks/task-one/executor/metadata.json"
 
 grep -q '^exec ' "$args_log"
 grep -q -- '--ephemeral' "$args_log"
 grep -q -- '--sandbox workspace-write' "$args_log"
 grep -q -- '--ignore-user-config' "$args_log"
+grep -q 'approval_policy="never"' "$args_log"
 grep -q 'sandbox_workspace_write.network_access=false' "$args_log"
 grep -q './deliverables/' "$prompt_log"
 grep -q '"auth_mode": "chatgpt-subscription"' "$out/tasks/task-one/executor/metadata.json"
 if grep -R -q 'must-not-leak' "$out"; then
   echo "secret leaked into run output" >&2
+  exit 1
+fi
+
+: >"$args_log"
+if PATH="$fake_bin:$PATH" \
+  FAKE_CODEX_ARGS_LOG="$args_log" \
+  FAKE_CODEX_PROMPT_LOG="$prompt_log" \
+  GDPVAL_BENCHMARK_JSONL="$benchmark" \
+  ./gdpval run --executor codex --out "$work/no-limit" --no-metadata >/dev/null 2>&1; then
+  echo "Codex run without --limit unexpectedly succeeded" >&2
+  exit 1
+fi
+if grep -q '^exec ' "$args_log"; then
+  echo "run without --limit issued a model execution" >&2
   exit 1
 fi
 
