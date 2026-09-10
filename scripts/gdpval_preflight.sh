@@ -79,6 +79,18 @@ else
   ok "judge-only mode: sandbox and search credential are not required"
 fi
 
+if [[ -n "${GDPVAL_REFERENCE_MANIFEST:-}" ]]; then
+  if [[ -r "$GDPVAL_REFERENCE_MANIFEST" ]]; then
+    ok "reference manifest: $GDPVAL_REFERENCE_MANIFEST"
+  else
+    fail "reference manifest is not readable: $GDPVAL_REFERENCE_MANIFEST"
+  fi
+fi
+
+if [[ "${GDPVAL_PROFILE:-}" == aa-v2 && -z "${GDPVAL_REFERENCE_MANIFEST:-}" ]]; then
+  fail "AA v2 profile requires a reference manifest"
+fi
+
 if [[ "${GDPVAL_REWARD_MODE:-rubric}" == comparison ]]; then
   if [[ -z "${GDPVAL_REFS:-}" ]]; then
     fail "comparison mode requires a reference directory"
