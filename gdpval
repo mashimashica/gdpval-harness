@@ -18,9 +18,12 @@ set -euo pipefail
 
 usage() {
   cat <<'USAGE'
-Usage: ./gdpval [options]
+Usage: ./gdpval [compare-runs] [options]
 
 Run this repository's GDPval recipe from the repository root.
+
+Commands:
+  compare-runs          Blind-compare two existing GDPval deliverable directories
 
 Options:
   --limit N             Run only N tasks (for example: --limit 1)
@@ -43,6 +46,10 @@ Options:
   --resume              Resume an interrupted run
   --pin-gym             Opt in to NVIDIA's pinned Gym revision reproduction
   --check               Validate local prerequisites and exit without running GDPval
+  --a DIR               compare-runs: candidate A deliverables
+  --b DIR               compare-runs: candidate B deliverables
+  --label-a LABEL       compare-runs: metadata label for candidate A
+  --label-b LABEL       compare-runs: metadata label for candidate B
   --no-metadata         Do not write run-metadata.json before execution
   -h, --help            Show this help
 
@@ -50,6 +57,12 @@ Set GDPVAL_API_KEY to override only the policy-model API key without putting
 the secret on the command line. Judge configuration remains in env.yaml.
 USAGE
 }
+
+export GDPVAL_COMMAND=run
+if [[ "${1-}" == compare-runs ]]; then
+  export GDPVAL_COMMAND=compare-runs
+  shift
+fi
 
 require_value() {
   local option="$1"
@@ -156,6 +169,26 @@ while (( $# )); do
       export GDPVAL_CHECK_ONLY=1
       shift
       ;;
+    --a)
+      require_value "$1" "${2-}"
+      export GDPVAL_RUN_A="$2"
+      shift 2
+      ;;
+    --b)
+      require_value "$1" "${2-}"
+      export GDPVAL_RUN_B="$2"
+      shift 2
+      ;;
+    --label-a)
+      require_value "$1" "${2-}"
+      export GDPVAL_LABEL_A="$2"
+      shift 2
+      ;;
+    --label-b)
+      require_value "$1" "${2-}"
+      export GDPVAL_LABEL_B="$2"
+      shift 2
+      ;;
     --no-metadata)
       export GDPVAL_WRITE_METADATA=0
       shift
@@ -197,6 +230,19 @@ if [[ ! -f "$RECIPE" ]]; then
 fi
 
 cd "$ROOT"
+if [[ "${GDPVAL_COMMAND:-run}" == compare-runs ]]; then
+  if [[ -z "${GDPVAL_RUN_A:-}" || -z "${GDPVAL_RUN_B:-}" ]]; then
+    echo "compare-runs requires both --a and --b" >&2
+    exit 2
+  fi
+  export JUDGE_ONLY=true
+  export GDPVAL_REWARD_MODE=comparison
+  export PERSIST_DELIVERABLES_DIR="$GDPVAL_RUN_A"
+  export GDPVAL_SINGLE_REFERENCE_DIR="$GDPVAL_RUN_B"
+  export GDPVAL_SINGLE_REFERENCE_ELO="${GDPVAL_SINGLE_REFERENCE_ELO:-1000}"
+  export OUT="${OUT:-./results/compare-runs}"
+  unset GDPVAL_PROFILE GDPVAL_REFS GDPVAL_REFERENCE_MANIFEST
+fi
 if [[ "${GDPVAL_PROFILE:-}" == aa-v2 && -z "${GDPVAL_REFERENCE_MANIFEST:-}" ]]; then
   export GDPVAL_REFERENCE_MANIFEST="$AA_V2_MANIFEST"
 fi
