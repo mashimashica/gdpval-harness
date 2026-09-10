@@ -24,6 +24,7 @@ BENCHMARK_JSONL = Path(
 )
 PREPARE_SCRIPT = Path(os.getenv("GDPVAL_PREPARE_SCRIPT", ROOT / "benchmarks" / "gdpval" / "prepare.py"))
 _TERMINAL_SUCCESS = {ExecutionStatus.COMPLETED, ExecutionStatus.NO_DELIVERABLE}
+_MAX_CONDITION_FILE_BYTES = 1024 * 1024
 
 
 def _truthy(name: str) -> bool:
@@ -50,6 +51,37 @@ def _executor(name: str):
     if name == "cursor":
         return CursorExecutor(network_enabled=network_enabled)
     raise ValueError(f"local executor {name!r} is not implemented")
+
+
+def _condition_file() -> Path | None:
+    raw = os.getenv("GDPVAL_CONDITION_FILE")
+    if not raw:
+        return None
+    path = Path(raw).expanduser().resolve()
+    if not path.is_file():
+        raise ValueError(f"--condition-file is not a readable file: {path}")
+    try:
+        size = path.stat().st_size
+    except OSError as exc:
+        raise ValueError(f"could not inspect --condition-file: {exc}") from exc
+    if size > _MAX_CONDITION_FILE_BYTES:
+        raise ValueError(
+            f"--condition-file exceeds {_MAX_CONDITION_FILE_BYTES} bytes; keep experiment instructions small and reviewable"
+        )
+    return path
+
+
+def _condition_instructions() -> str | None:
+    path = _condition_file()
+    if path is None:
+        return None
+    try:
+        text = path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError) as exc:
+        raise ValueError(f"could not read --condition-file as UTF-8: {exc}") from exc
+    if not text.strip():
+        raise ValueError("--condition-file is empty")
+    return text.rstrip()
 
 
 def _ensure_dataset() -> None:
@@ -139,7 +171,23 @@ def _reference_listing(workspace: Path) -> str:
     return "\n".join(f"- {item}" for item in files) if files else "None"
 
 
-def build_task_prompt(task: TaskSpec, workspace: Path, *, network_policy: str) -> str:
+def build_task_prompt(
+    task: TaskSpec,
+    workspace: Path,
+    *,
+    network_policy: str,
+    condition_instructions: str | None = None,
+) -> str:
+    condition_section = ""
+    if condition_instructions:
+        condition_section = f"""
+Additional experiment-condition instructions:
+<condition_instructions>
+{condition_instructions}
+</condition_instructions>
+
+Apply these instructions while completing the task. They are an external experimental intervention, not part of GDPval itself.
+"""
     return f"""You are completing a GDPval professional-work task in an isolated local workspace.
 
 Work only on this task. Do not create, hand off, or continue the task in any cloud/background agent.
@@ -155,7 +203,7 @@ Final deliverables contract:
 - Keep scratch files, logs, caches, helper scripts, and executor metadata out of ./deliverables/.
 - Do not modify the reference_files directory.
 - Network policy for model-generated tools: {network_policy}.
-
+{condition_section}
 Task:
 {task.prompt}
 """
@@ -295,6 +343,7 @@ def preflight(executor_name: str, out_dir: Path, *, for_run: bool) -> tuple[bool
         _parse_timeout()
         if executor_name == "claude-code":
             _parse_max_turns()
+        _condition_file()
     except ValueError as exc:
         details.append(str(exc))
         ok = False
@@ -302,6 +351,8 @@ def preflight(executor_name: str, out_dir: Path, *, for_run: bool) -> tuple[bool
     if for_run:
         try:
             _parse_limit()
+            if os.getenv("GDPVAL_CONDITION_FILE"):
+                _condition_instructions()
         except ValueError as exc:
             details.append(str(exc))
             ok = False
@@ -320,6 +371,10 @@ def preflight(executor_name: str, out_dir: Path, *, for_run: bool) -> tuple[bool
         if BENCHMARK_JSONL.is_file()
         else "benchmark JSONL is not prepared yet; run will invoke the existing GDPval prepare script"
     )
+    if os.getenv("GDPVAL_CONDITION"):
+        details.append(f"experiment condition label: {os.environ['GDPVAL_CONDITION']}")
+    if os.getenv("GDPVAL_CONDITION_FILE"):
+        details.append("external condition instructions validated")
     return ok, {
         "executor": executor_name,
         "ok": ok,
@@ -341,6 +396,7 @@ def _write_run_metadata(out_dir: Path, preflight_payload: dict[str, object]) -> 
     env["GDPVAL_EXECUTOR_NETWORK"] = os.getenv("GDPVAL_EXECUTOR_NETWORK", "disabled")
     env["GDPVAL_EXECUTOR_TOOL_PERMISSION_MODE"] = getattr(executor, "tool_permission_mode", "")
     env["GDPVAL_EXECUTOR_MAX_TURNS"] = os.getenv("GDPVAL_EXECUTOR_MAX_TURNS", "")
+    env["GDPVAL_CONDITION_APPLIED"] = "true" if os.getenv("GDPVAL_CONDITION_FILE") else "false"
     subprocess.run([sys.executable, str(ROOT / "scripts" / "gdpval_run_metadata.py")], cwd=ROOT, env=env, check=True)
 
 
@@ -354,6 +410,7 @@ def run() -> int:
         print(f"gdpval[{executor_name}]: preflight failed", file=sys.stderr)
         return 2
 
+    condition_instructions = _condition_instructions()
     if os.getenv("GDPVAL_WRITE_METADATA", "1") != "0":
         _write_run_metadata(out_dir, preflight_payload)
 
@@ -376,7 +433,12 @@ def run() -> int:
             _materialize_reference_files(task, layout.workspace)
             prompt_task = TaskSpec(
                 task_id=task.task_id,
-                prompt=build_task_prompt(task, layout.workspace, network_policy=network_policy),
+                prompt=build_task_prompt(
+                    task,
+                    layout.workspace,
+                    network_policy=network_policy,
+                    condition_instructions=condition_instructions,
+                ),
                 reference_files=task.reference_files,
                 reference_file_urls=task.reference_file_urls,
                 sector=task.sector,
@@ -427,7 +489,11 @@ def run() -> int:
         if result.status not in _TERMINAL_SUCCESS:
             failures += 1
 
-    summary = {"executor": executor_name, "failed_tasks": failures}
+    summary = {
+        "executor": executor_name,
+        "condition": os.getenv("GDPVAL_CONDITION"),
+        "failed_tasks": failures,
+    }
     (out_dir / "executor-summary.json").write_text(json.dumps(summary, indent=2) + "\n", encoding="utf-8")
     return 1 if failures else 0
 
