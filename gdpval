@@ -34,6 +34,8 @@ Core options:
   --parallel N          Evaluator and agent concurrency
   --executor NAME       Agent runtime (default: stirrup)
   --executor-timeout S  Per-task timeout for local executors; rejected by Stirrup
+  --executor-network MODE
+                        Local tool network policy: disabled (default) or enabled
   --provider NAME       Policy-provider preset for executor=stirrup
   --model-type TYPE     Gym response model type for executor=stirrup
   --model MODEL         Policy/executor model ID when supported
@@ -100,6 +102,7 @@ while (( $# )); do
     --parallel) require_value "$1" "${2-}"; export PARALLEL="$2"; shift 2 ;;
     --executor) require_value "$1" "${2-}"; export GDPVAL_EXECUTOR="$2"; shift 2 ;;
     --executor-timeout) require_value "$1" "${2-}"; export GDPVAL_EXECUTOR_TIMEOUT="$2"; shift 2 ;;
+    --executor-network) require_value "$1" "${2-}"; export GDPVAL_EXECUTOR_NETWORK="$2"; shift 2 ;;
     --provider) require_value "$1" "${2-}"; export GDPVAL_PROVIDER="$2"; shift 2 ;;
     --model-type) require_value "$1" "${2-}"; export GDPVAL_MODEL_TYPE="$2"; shift 2 ;;
     --model) require_value "$1" "${2-}"; export GDPVAL_MODEL="$2"; shift 2 ;;
@@ -221,14 +224,35 @@ if [[ -n "${GDPVAL_JUDGE_API_KEY:-}" ]]; then export JUDGE_API_KEY="$GDPVAL_JUDG
 if [[ -n "${GDPVAL_JUDGE_BASE_URL:-}" ]]; then export JUDGE_BASE_URL="$GDPVAL_JUDGE_BASE_URL"; fi
 if [[ -n "${GDPVAL_JUDGE_MODEL:-}" ]]; then export JUDGE_MODEL_NAME="$GDPVAL_JUDGE_MODEL"; fi
 
+if [[ "$GDPVAL_EXECUTOR" != stirrup ]]; then
+  case "${GDPVAL_EXECUTOR_NETWORK:-disabled}" in
+    disabled|enabled) ;;
+    *) echo "--executor-network must be disabled or enabled" >&2; exit 2 ;;
+  esac
+  if [[ "${GDPVAL_COMMAND:-run}" == compare-runs ]]; then
+    echo "compare-runs uses the judge path; --executor selects policy execution only" >&2
+    exit 2
+  fi
+  if [[ "${PIN_GYM:-0}" != 0 ]]; then
+    echo "--pin-gym is only valid with --executor stirrup" >&2
+    exit 2
+  fi
+  if [[ "${JUDGE_ONLY:-false}" == true || "${GDPVAL_REWARD_MODE:-rubric}" == comparison ]]; then
+    echo "local policy executors produce deliverables only; judging/comparison is a separate command" >&2
+    exit 2
+  fi
+  if [[ "${GDPVAL_COMMAND:-run}" == check ]]; then
+    exec python3 -m gdpval_harness.local_runner check
+  fi
+  if [[ "${GDPVAL_COMMAND:-run}" != run ]]; then
+    echo "executor '$GDPVAL_EXECUTOR' is not valid for command '${GDPVAL_COMMAND:-run}'" >&2
+    exit 2
+  fi
+  exec python3 -m gdpval_harness.local_runner run
+fi
+
 "$PREFLIGHT"
 
 if [[ "${GDPVAL_CHECK_ONLY:-0}" != 0 ]]; then exit 0; fi
 if [[ "${GDPVAL_WRITE_METADATA:-1}" != 0 ]]; then python3 "$METADATA"; fi
-
-if [[ "$GDPVAL_EXECUTOR" != stirrup ]]; then
-  echo "executor '$GDPVAL_EXECUTOR' is registered but has no runner in this stack yet" >&2
-  exit 2
-fi
-
 exec bash "$RECIPE"

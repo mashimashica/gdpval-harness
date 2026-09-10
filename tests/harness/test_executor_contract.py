@@ -14,7 +14,7 @@ from gdpval_harness.layout import safe_task_id, task_layout
 
 class ExecutorContractTests(unittest.TestCase):
     def test_registry_exposes_stirrup(self) -> None:
-        self.assertEqual([item.name for item in list_executors()], ["stirrup"])
+        self.assertEqual([item.name for item in list_executors()], ["codex", "stirrup"])
         self.assertEqual(get_executor_descriptor("stirrup").usage_mode, "provider-backed model API")
 
     def test_unknown_executor_fails_closed(self) -> None:

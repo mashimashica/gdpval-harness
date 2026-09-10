@@ -41,21 +41,31 @@ def main() -> None:
 
     status = git_value("status", "--porcelain")
     reference_manifest = os.getenv("GDPVAL_REFERENCE_MANIFEST")
+    executor = os.getenv("GDPVAL_EXECUTOR", "stirrup")
     payload = {
         "schema_version": 2,
         "created_at": datetime.now(timezone.utc).isoformat(),
-        "repository": {"commit": git_value("rev-parse", "HEAD"), "dirty": bool(status)},
+        "repository": {
+            "commit": git_value("rev-parse", "HEAD"),
+            "dirty": bool(status),
+        },
         "configuration": {
             "env_yaml_sha256": sha256(root / "env.yaml"),
             "command": os.getenv("GDPVAL_COMMAND", "run"),
             "profile": os.getenv("GDPVAL_PROFILE"),
-            "executor": os.getenv("GDPVAL_EXECUTOR", "stirrup"),
+            "executor": executor,
             "executor_timeout_seconds": os.getenv("GDPVAL_EXECUTOR_TIMEOUT"),
-            "provider": os.getenv("GDPVAL_PROVIDER"),
-            "model_type": os.getenv("GDPVAL_MODEL_TYPE", "vllm_model"),
+            "executor_version": os.getenv("GDPVAL_EXECUTOR_VERSION"),
+            "executor_invocation_mode": os.getenv("GDPVAL_EXECUTOR_INVOCATION_MODE"),
+            "executor_auth_mode": os.getenv("GDPVAL_EXECUTOR_AUTH_MODE"),
+            "executor_workspace_isolation": os.getenv("GDPVAL_EXECUTOR_WORKSPACE_ISOLATION"),
+            "executor_network_policy": os.getenv("GDPVAL_EXECUTOR_NETWORK"),
+            "executor_tool_permission_mode": os.getenv("GDPVAL_EXECUTOR_TOOL_PERMISSION_MODE"),
+            "provider": os.getenv("GDPVAL_PROVIDER") if executor == "stirrup" else None,
+            "model_type": os.getenv("GDPVAL_MODEL_TYPE", "vllm_model") if executor == "stirrup" else None,
             "model": os.getenv("GDPVAL_MODEL"),
-            "base_url": os.getenv("GDPVAL_BASE_URL"),
-            "policy_api_key_override": bool(os.getenv("GDPVAL_API_KEY")),
+            "base_url": os.getenv("GDPVAL_BASE_URL") if executor == "stirrup" else None,
+            "policy_api_key_override": bool(os.getenv("GDPVAL_API_KEY")) if executor == "stirrup" else False,
             "reward_mode": os.getenv("GDPVAL_REWARD_MODE", "rubric"),
             "references_dir": os.getenv("GDPVAL_REFS"),
             "reference_manifest": reference_manifest,
@@ -76,8 +86,12 @@ def main() -> None:
             "resume": truthy("RESUME"),
             "pin_gym": truthy("PIN_GYM"),
         },
-        "output": {"directory": str(out_dir), "deliverables_dir": os.getenv("PERSIST_DELIVERABLES_DIR")},
+        "output": {
+            "directory": str(out_dir),
+            "deliverables_dir": os.getenv("PERSIST_DELIVERABLES_DIR"),
+        },
     }
+
     temp_path = metadata_path.with_suffix(".json.tmp")
     temp_path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     temp_path.replace(metadata_path)

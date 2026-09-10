@@ -14,6 +14,11 @@ class ExecutorDescriptor:
 
 
 _EXECUTORS = {
+    "codex": ExecutorDescriptor(
+        name="codex",
+        runtime="Codex CLI (local)",
+        usage_mode="ChatGPT subscription login only",
+    ),
     "stirrup": ExecutorDescriptor(
         name="stirrup",
         runtime="NeMo Gym / Stirrup",

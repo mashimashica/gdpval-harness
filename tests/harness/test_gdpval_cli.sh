@@ -25,6 +25,7 @@ grep -q '^gemini ' <<<"$providers"
 grep -q '^openrouter ' <<<"$providers"
 
 executors="$(./gdpval executors)"
+grep -q '^codex' <<<"$executors"
 grep -q '^stirrup' <<<"$executors"
 
 overrides="$(OPENAI_API_KEY=test-policy-key bash -c '
@@ -53,9 +54,12 @@ PYTHONPYCACHEPREFIX="$pycache" python3 -m py_compile \
   scripts/gdpval_run_metadata.py \
   gdpval_harness/__init__.py \
   gdpval_harness/layout.py \
+  gdpval_harness/local_runner.py \
   gdpval_harness/executors/__init__.py \
   gdpval_harness/executors/base.py \
+  gdpval_harness/executors/codex.py \
   gdpval_harness/executors/registry.py
-python3 -m unittest discover -s tests/harness -p 'test_executor_contract.py'
+python3 -m unittest discover -s tests/harness -p 'test_*.py'
+bash tests/harness/test_codex_executor.sh
 
 printf 'gdpval harness self-test passed\n'
