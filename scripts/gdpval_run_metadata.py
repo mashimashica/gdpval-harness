@@ -40,6 +40,7 @@ def main() -> None:
     metadata_path = out_dir / "run-metadata.json"
 
     status = git_value("status", "--porcelain")
+    reference_manifest = os.getenv("GDPVAL_REFERENCE_MANIFEST")
     payload = {
         "schema_version": 1,
         "created_at": datetime.now(timezone.utc).isoformat(),
@@ -49,6 +50,7 @@ def main() -> None:
         },
         "configuration": {
             "env_yaml_sha256": sha256(root / "env.yaml"),
+            "profile": os.getenv("GDPVAL_PROFILE"),
             "provider": os.getenv("GDPVAL_PROVIDER"),
             "model_type": os.getenv("GDPVAL_MODEL_TYPE", "vllm_model"),
             "model": os.getenv("GDPVAL_MODEL"),
@@ -56,6 +58,8 @@ def main() -> None:
             "policy_api_key_override": bool(os.getenv("GDPVAL_API_KEY")),
             "reward_mode": os.getenv("GDPVAL_REWARD_MODE", "rubric"),
             "references_dir": os.getenv("GDPVAL_REFS"),
+            "reference_manifest": reference_manifest,
+            "reference_manifest_sha256": sha256(Path(reference_manifest)) if reference_manifest else None,
             "judge_panel": os.getenv("GDPVAL_JUDGE_PANEL", "aa-v2"),
             "judge_model": os.getenv("GDPVAL_JUDGE_MODEL"),
             "judge_base_url": os.getenv("GDPVAL_JUDGE_BASE_URL"),
