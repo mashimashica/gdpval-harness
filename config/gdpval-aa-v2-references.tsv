@@ -1,0 +1,12 @@
+# GDPval-AA v2 reference anchors used by the NVIDIA reproduction recipe.
+# These values are intentionally pinned. Updating them changes the rating scale.
+# name	elo
+deepseek_v4_pro	1307
+glm51_fp8	1257
+kimi_k26	1191
+nemotron3_ultra	1164
+qwen36_35b	1049
+qwen35_397b	962
+gptoss_120b	799
+gemma4_26b	761
+qwen3_30b_thinking	308
