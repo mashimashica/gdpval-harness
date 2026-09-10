@@ -37,6 +37,9 @@ Options:
   --judge-only          Re-score existing deliverables without running the agent
   --rubric              Score against GDPval rubrics (default)
   --comparison DIR      Compare against rated reference deliverables in DIR
+  --reference-manifest FILE
+                        Reference model names and Elo anchors for comparison mode
+  --aa-v2 DIR           GDPval-AA v2 profile using the pinned reference manifest
   --resume              Resume an interrupted run
   --pin-gym             Opt in to NVIDIA's pinned Gym revision reproduction
   --check               Validate local prerequisites and exit without running GDPval
@@ -128,6 +131,19 @@ while (( $# )); do
       export GDPVAL_REFS="$2"
       shift 2
       ;;
+    --reference-manifest)
+      require_value "$1" "${2-}"
+      export GDPVAL_REFERENCE_MANIFEST="$2"
+      shift 2
+      ;;
+    --aa-v2)
+      require_value "$1" "${2-}"
+      export GDPVAL_PROFILE=aa-v2
+      export GDPVAL_REWARD_MODE=comparison
+      export GDPVAL_REFS="$2"
+      export GDPVAL_JUDGE_PANEL=aa-v2
+      shift 2
+      ;;
     --resume)
       export RESUME=1
       shift
@@ -161,6 +177,7 @@ PROVIDERS="$ROOT/scripts/gdpval_provider.sh"
 PREFLIGHT="$ROOT/scripts/gdpval_preflight.sh"
 METADATA="$ROOT/scripts/gdpval_run_metadata.py"
 RECIPE="$ROOT/nemotron_recipes/lightning-3.5/instruct/gym/gdpval/gdpval.sh"
+AA_V2_MANIFEST="$ROOT/config/gdpval-aa-v2-references.tsv"
 
 if [[ ! -f "$PROVIDERS" ]]; then
   echo "GDPval provider helper not found: $PROVIDERS" >&2
@@ -180,6 +197,9 @@ if [[ ! -f "$RECIPE" ]]; then
 fi
 
 cd "$ROOT"
+if [[ "${GDPVAL_PROFILE:-}" == aa-v2 && -z "${GDPVAL_REFERENCE_MANIFEST:-}" ]]; then
+  export GDPVAL_REFERENCE_MANIFEST="$AA_V2_MANIFEST"
+fi
 # shellcheck source=scripts/gdpval_provider.sh
 source "$PROVIDERS"
 if [[ -n "${GDPVAL_PROVIDER:-}" ]]; then
