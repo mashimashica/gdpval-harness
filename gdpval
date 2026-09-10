@@ -27,6 +27,8 @@ Options:
   --out DIR             Output directory (default: ./results/gdpval)
   --parallel N          Evaluator and agent concurrency
   --model-type TYPE     Gym response model type (default: vllm_model)
+  --model MODEL         Override the policy model ID from env.yaml
+  --base-url URL        Override the policy model base URL from env.yaml
   --judge-only          Re-score existing deliverables without running the agent
   --rubric              Score against GDPval rubrics (default)
   --comparison DIR      Compare against rated reference deliverables in DIR
@@ -34,7 +36,8 @@ Options:
   --pin-gym             Opt in to NVIDIA's pinned Gym revision reproduction
   -h, --help            Show this help
 
-The model endpoint and model ID remain configured through env.yaml.
+Set GDPVAL_API_KEY to override only the policy-model API key without putting
+the secret on the command line. Judge configuration remains in env.yaml.
 USAGE
 }
 
@@ -67,6 +70,16 @@ while (( $# )); do
     --model-type)
       require_value "$1" "${2-}"
       export GDPVAL_MODEL_TYPE="$2"
+      shift 2
+      ;;
+    --model)
+      require_value "$1" "${2-}"
+      export GDPVAL_MODEL="$2"
+      shift 2
+      ;;
+    --base-url)
+      require_value "$1" "${2-}"
+      export GDPVAL_BASE_URL="$2"
       shift 2
       ;;
     --judge-only)

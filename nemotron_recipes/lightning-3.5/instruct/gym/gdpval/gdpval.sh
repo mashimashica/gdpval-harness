@@ -28,6 +28,7 @@
 #   LIMIT=3 nemotron_recipes/lightning-3.5/instruct/gym/gdpval/gdpval.sh                 # quick smoke
 #   OUT=<dir> PARALLEL=<n> nemotron_recipes/lightning-3.5/instruct/gym/gdpval/gdpval.sh  # output dir, concurrency
 #   GDPVAL_MODEL_TYPE=<type> .../gdpval.sh                                               # alternate Gym model type
+#   GDPVAL_MODEL=<id> GDPVAL_BASE_URL=<url> .../gdpval.sh                               # policy target overrides
 #
 # Scores each deliverable against its rubric. Comparison mode instead scores against
 # reference deliverables you generate yourself, one subdirectory per reference model;
@@ -55,14 +56,28 @@ GDR=gdpval_resources_server.resources_servers.gdpval
 JUDGE=gdpval_judge_model.responses_api_models.openai_model
 MODEL_TYPE="${GDPVAL_MODEL_TYPE:-vllm_model}"
 
+# policy_base_url, policy_api_key, and policy_model_name are shared by Gym's
+# vllm_model, openai_model, and litellm_model configs. Command-line ++ overrides
+# env.yaml without coupling this runner to each backend's internal field names.
+MODEL_OVR=()
+if [ -n "${GDPVAL_BASE_URL:-}" ]; then
+  MODEL_OVR+=("++policy_base_url=$GDPVAL_BASE_URL")
+fi
+if [ -n "${GDPVAL_MODEL:-}" ]; then
+  MODEL_OVR+=("++policy_model_name=$GDPVAL_MODEL")
+fi
+if [ -n "${GDPVAL_API_KEY:-}" ]; then
+  # Resolve the secret from the child environment so it never appears in argv.
+  MODEL_OVR+=('++policy_api_key=${oc.env:GDPVAL_API_KEY}')
+fi
+
 # The Nemotron reproduction settings below are specific to the vLLM policy model.
 # Do not inject them into other Gym model backends.
-MODEL_OVR=()
 if [ "$MODEL_TYPE" = "vllm_model" ]; then
   POLICY=policy_model.responses_api_models.vllm_model
-  MODEL_OVR=("++$POLICY.chat_template_kwargs={enable_thinking: true}"
-             "++$POLICY.extra_body={skip_special_tokens: false}"
-             "++$POLICY.sequential_reasoning_allowed=false")
+  MODEL_OVR+=("++$POLICY.chat_template_kwargs={enable_thinking: true}"
+              "++$POLICY.extra_body={skip_special_tokens: false}"
+              "++$POLICY.sequential_reasoning_allowed=false")
 fi
 
 # Absolute path required. A comparison run points GDPVAL_REFS at one of these.
