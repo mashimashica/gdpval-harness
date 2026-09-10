@@ -14,6 +14,7 @@ from typing import Iterable
 from gdpval_harness.executors.base import ExecutionRequest, ExecutionResult, ExecutionStatus, TaskSpec
 from gdpval_harness.executors.claude_code import ClaudeCodeExecutor
 from gdpval_harness.executors.codex import CodexExecutor
+from gdpval_harness.executors.cursor import CursorExecutor
 from gdpval_harness.layout import TaskLayout, task_layout
 
 
@@ -46,6 +47,8 @@ def _executor(name: str):
         return CodexExecutor(network_enabled=network_enabled)
     if name == "claude-code":
         return ClaudeCodeExecutor(network_enabled=network_enabled, max_turns=_parse_max_turns())
+    if name == "cursor":
+        return CursorExecutor(network_enabled=network_enabled)
     raise ValueError(f"local executor {name!r} is not implemented")
 
 
