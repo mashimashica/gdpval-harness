@@ -37,10 +37,6 @@
 # Note: PARALLEL is applied twice on purpose — the agent caps its own concurrent runs
 # at 32 regardless of --concurrency, so raising only one of them does nothing.
 
-# Used judges: Gym's default panel — GPT-5.5, Gemini 3.1 Pro and Claude Opus 4.8,
-# one sampled per call. All three route through gdpval_judge_model in env.yaml, so
-# that endpoint has to serve every one of them.
-
 # JUDGE_ONLY re-scores existing deliverables without running the agent, so it
 # needs neither the sandbox nor a search key.
 if [ "${JUDGE_ONLY:-false}" = "true" ]; then
@@ -56,9 +52,6 @@ GDR=gdpval_resources_server.resources_servers.gdpval
 JUDGE=gdpval_judge_model.responses_api_models.openai_model
 MODEL_TYPE="${GDPVAL_MODEL_TYPE:-vllm_model}"
 
-# policy_base_url, policy_api_key, and policy_model_name are shared by Gym's
-# vllm_model, openai_model, and litellm_model configs. Command-line ++ overrides
-# env.yaml without coupling this runner to each backend's internal field names.
 MODEL_OVR=()
 if [ -n "${GDPVAL_BASE_URL:-}" ]; then
   MODEL_OVR+=("++policy_base_url=$GDPVAL_BASE_URL")
@@ -67,12 +60,9 @@ if [ -n "${GDPVAL_MODEL:-}" ]; then
   MODEL_OVR+=("++policy_model_name=$GDPVAL_MODEL")
 fi
 if [ -n "${GDPVAL_API_KEY:-}" ]; then
-  # Resolve the secret from the child environment so it never appears in argv.
   MODEL_OVR+=('++policy_api_key=${oc.env:GDPVAL_API_KEY}')
 fi
 
-# The Nemotron reproduction settings below are specific to the vLLM policy model.
-# Do not inject them into other Gym model backends.
 if [ "$MODEL_TYPE" = "vllm_model" ]; then
   POLICY=policy_model.responses_api_models.vllm_model
   MODEL_OVR+=("++$POLICY.chat_template_kwargs={enable_thinking: true}"
@@ -80,11 +70,7 @@ if [ "$MODEL_TYPE" = "vllm_model" ]; then
               "++$POLICY.sequential_reasoning_allowed=false")
 fi
 
-# Absolute path required. A comparison run points GDPVAL_REFS at one of these.
 DELIVERABLES="${PERSIST_DELIVERABLES_DIR:-$(realpath -m "${OUT:-./results/gdpval}/deliverables")}"
-
-# Comparison anchors live in a manifest so the rating scale is explicit and auditable.
-# The AA-v2 profile points GDPVAL_REFERENCE_MANIFEST at the pinned manifest in config/.
 REFERENCE_MANIFEST="${GDPVAL_REFERENCE_MANIFEST:-config/gdpval-aa-v2-references.tsv}"
 
 MODE="${GDPVAL_REWARD_MODE:-rubric}"
@@ -106,8 +92,13 @@ case "${GDPVAL_JUDGE_PANEL:-aa-v2}" in
     ;;
 esac
 
-MODE_OVR=()   # rubric is the config default and needs nothing added
-if [ "$MODE" = comparison ]; then
+MODE_OVR=()
+if [ "$MODE" = comparison ] && [ -n "${GDPVAL_SINGLE_REFERENCE_DIR:-}" ]; then
+  MODE_OVR=("++$GDR.reward_mode=comparison"
+            "++$GDR.reference_deliverables_dir=$GDPVAL_SINGLE_REFERENCE_DIR"
+            "++$GDR.reference_elo=${GDPVAL_SINGLE_REFERENCE_ELO:-1000}")
+  echo "gdpval: comparison against one unrated experiment reference" >&2
+elif [ "$MODE" = comparison ]; then
   GDPVAL_REFS="${GDPVAL_REFS:?export GDPVAL_REFS (dir of reference deliverables)}"
   [ -r "$REFERENCE_MANIFEST" ] || {
     echo "reference manifest not readable: $REFERENCE_MANIFEST" >&2
@@ -137,8 +128,6 @@ if [ "$MODE" = comparison ]; then
     exit 1
   fi
 
-  # Two or more opponents: stage 1 places the model, stage 2 spends the full task
-  # budget on the nearest of them. With one there is nothing to narrow to.
   if [ "$found" -ge 2 ]; then
     MODE_OVR+=("++multistage.enabled=true"
                "++multistage.stages=[{num_tasks: 45}, {num_models: $((found < 4 ? found : 4))}]")
@@ -147,10 +136,6 @@ if [ "$MODE" = comparison ]; then
   echo "gdpval: comparison against $found rated reference(s)" >&2
 fi
 
-# The original reproduction recipe can pin Gym to the commit used for the tech report.
-# Harness runs leave the working tree untouched by default. Set PIN_GYM=1 explicitly
-# when reproducing the pinned environment; nemotron_recipes is excluded and HEAD does
-# not move, but tracked source files outside that directory are restored from GYM_PIN.
 GYM_PIN="${GYM_PIN:-57c15a22f8b82d3d859b71468fe3329f4e2093b4}"
 if [ "${PIN_GYM:-0}" != 0 ]; then
   git rev-parse --verify -q "$GYM_PIN^{commit}" >/dev/null 2>&1 || git fetch origin "$GYM_PIN"
