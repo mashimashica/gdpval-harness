@@ -14,6 +14,11 @@ class ExecutorDescriptor:
 
 
 _EXECUTORS = {
+    "claude-code": ExecutorDescriptor(
+        name="claude-code",
+        runtime="Claude Code (local)",
+        usage_mode="Claude subscription login only",
+    ),
     "codex": ExecutorDescriptor(
         name="codex",
         runtime="Codex CLI (local)",
