@@ -75,6 +75,7 @@ class ClaudeCodeExecutor(Executor):
                 check=False,
                 capture_output=True,
                 text=True,
+                errors="replace",
                 timeout=10,
                 env=subscription_environment(),
             )
@@ -95,6 +96,7 @@ class ClaudeCodeExecutor(Executor):
                 check=False,
                 capture_output=True,
                 text=True,
+                errors="replace",
                 timeout=15,
                 env=subscription_environment(),
             )
@@ -209,6 +211,7 @@ class ClaudeCodeExecutor(Executor):
                 input=request.task.prompt,
                 capture_output=True,
                 text=True,
+                errors="replace",
                 cwd=request.workspace,
                 env=subscription_environment(request.environment),
                 timeout=request.timeout_seconds,
