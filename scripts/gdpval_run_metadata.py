@@ -42,16 +42,15 @@ def main() -> None:
     status = git_value("status", "--porcelain")
     reference_manifest = os.getenv("GDPVAL_REFERENCE_MANIFEST")
     payload = {
-        "schema_version": 1,
+        "schema_version": 2,
         "created_at": datetime.now(timezone.utc).isoformat(),
-        "repository": {
-            "commit": git_value("rev-parse", "HEAD"),
-            "dirty": bool(status),
-        },
+        "repository": {"commit": git_value("rev-parse", "HEAD"), "dirty": bool(status)},
         "configuration": {
             "env_yaml_sha256": sha256(root / "env.yaml"),
             "command": os.getenv("GDPVAL_COMMAND", "run"),
             "profile": os.getenv("GDPVAL_PROFILE"),
+            "executor": os.getenv("GDPVAL_EXECUTOR", "stirrup"),
+            "executor_timeout_seconds": os.getenv("GDPVAL_EXECUTOR_TIMEOUT"),
             "provider": os.getenv("GDPVAL_PROVIDER"),
             "model_type": os.getenv("GDPVAL_MODEL_TYPE", "vllm_model"),
             "model": os.getenv("GDPVAL_MODEL"),
@@ -77,12 +76,8 @@ def main() -> None:
             "resume": truthy("RESUME"),
             "pin_gym": truthy("PIN_GYM"),
         },
-        "output": {
-            "directory": str(out_dir),
-            "deliverables_dir": os.getenv("PERSIST_DELIVERABLES_DIR"),
-        },
+        "output": {"directory": str(out_dir), "deliverables_dir": os.getenv("PERSIST_DELIVERABLES_DIR")},
     }
-
     temp_path = metadata_path.with_suffix(".json.tmp")
     temp_path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     temp_path.replace(metadata_path)

@@ -24,6 +24,7 @@ Usage:
   ./gdpval aa-v2 --refs DIR [options]
   ./gdpval compare-runs --a DIR --b DIR [options]
   ./gdpval providers
+  ./gdpval executors
 
 `run` is the default when the first argument is an option.
 
@@ -31,10 +32,12 @@ Core options:
   --limit N             Run only N tasks
   --out DIR             Output directory
   --parallel N          Evaluator and agent concurrency
-  --provider NAME       Policy-provider preset
-  --model-type TYPE     Gym response model type
-  --model MODEL         Policy model ID
-  --base-url URL        Policy model base URL
+  --executor NAME       Agent runtime (default: stirrup)
+  --executor-timeout S  Per-task timeout for local executors; rejected by Stirrup
+  --provider NAME       Policy-provider preset for executor=stirrup
+  --model-type TYPE     Gym response model type for executor=stirrup
+  --model MODEL         Policy/executor model ID when supported
+  --base-url URL        Policy model base URL for executor=stirrup
 
 Judge options:
   --judge-panel MODE    aa-v2 (default) or single
@@ -64,33 +67,21 @@ Other:
   --no-metadata         Do not write run-metadata.json
   -h, --help            Show this help
 
+An executor is the agent runtime that performs work. A provider is only the
+model backend used by executor=stirrup. Judge configuration is independent.
 Policy secrets stay in environment variables. `GDPVAL_API_KEY` overrides only
-the policy credential. `GDPVAL_JUDGE_API_KEY` overrides only the judge credential.
+the Stirrup policy credential. `GDPVAL_JUDGE_API_KEY` overrides only the judge credential.
 USAGE
 }
 
 export GDPVAL_COMMAND=run
 case "${1-}" in
-  run)
-    shift
-    ;;
-  check)
-    export GDPVAL_COMMAND=check
-    export GDPVAL_CHECK_ONLY=1
-    shift
-    ;;
-  aa-v2)
-    export GDPVAL_COMMAND=aa-v2
-    shift
-    ;;
-  compare-runs)
-    export GDPVAL_COMMAND=compare-runs
-    shift
-    ;;
-  providers)
-    export GDPVAL_COMMAND=providers
-    shift
-    ;;
+  run) shift ;;
+  check) export GDPVAL_COMMAND=check GDPVAL_CHECK_ONLY=1; shift ;;
+  aa-v2) export GDPVAL_COMMAND=aa-v2; shift ;;
+  compare-runs) export GDPVAL_COMMAND=compare-runs; shift ;;
+  providers) export GDPVAL_COMMAND=providers; shift ;;
+  executors) export GDPVAL_COMMAND=executors; shift ;;
 esac
 
 require_value() {
@@ -104,137 +95,43 @@ require_value() {
 
 while (( $# )); do
   case "$1" in
-    --limit)
-      require_value "$1" "${2-}"
-      export LIMIT="$2"
-      shift 2
-      ;;
-    --out)
-      require_value "$1" "${2-}"
-      export OUT="$2"
-      shift 2
-      ;;
-    --parallel)
-      require_value "$1" "${2-}"
-      export PARALLEL="$2"
-      shift 2
-      ;;
-    --provider)
-      require_value "$1" "${2-}"
-      export GDPVAL_PROVIDER="$2"
-      shift 2
-      ;;
-    --model-type)
-      require_value "$1" "${2-}"
-      export GDPVAL_MODEL_TYPE="$2"
-      shift 2
-      ;;
-    --model)
-      require_value "$1" "${2-}"
-      export GDPVAL_MODEL="$2"
-      shift 2
-      ;;
-    --base-url)
-      require_value "$1" "${2-}"
-      export GDPVAL_BASE_URL="$2"
-      shift 2
-      ;;
-    --judge-panel)
-      require_value "$1" "${2-}"
-      export GDPVAL_JUDGE_PANEL="$2"
-      shift 2
-      ;;
-    --judge-model)
-      require_value "$1" "${2-}"
-      export GDPVAL_JUDGE_MODEL="$2"
-      shift 2
-      ;;
-    --judge-base-url)
-      require_value "$1" "${2-}"
-      export GDPVAL_JUDGE_BASE_URL="$2"
-      shift 2
-      ;;
-    --judge-seed)
-      require_value "$1" "${2-}"
-      export JUDGE_SAMPLING_SEED="$2"
-      shift 2
-      ;;
-    --judge-only)
-      export JUDGE_ONLY=true
-      shift
-      ;;
-    --rubric)
-      export GDPVAL_REWARD_MODE=rubric
-      shift
-      ;;
+    --limit) require_value "$1" "${2-}"; export LIMIT="$2"; shift 2 ;;
+    --out) require_value "$1" "${2-}"; export OUT="$2"; shift 2 ;;
+    --parallel) require_value "$1" "${2-}"; export PARALLEL="$2"; shift 2 ;;
+    --executor) require_value "$1" "${2-}"; export GDPVAL_EXECUTOR="$2"; shift 2 ;;
+    --executor-timeout) require_value "$1" "${2-}"; export GDPVAL_EXECUTOR_TIMEOUT="$2"; shift 2 ;;
+    --provider) require_value "$1" "${2-}"; export GDPVAL_PROVIDER="$2"; shift 2 ;;
+    --model-type) require_value "$1" "${2-}"; export GDPVAL_MODEL_TYPE="$2"; shift 2 ;;
+    --model) require_value "$1" "${2-}"; export GDPVAL_MODEL="$2"; shift 2 ;;
+    --base-url) require_value "$1" "${2-}"; export GDPVAL_BASE_URL="$2"; shift 2 ;;
+    --judge-panel) require_value "$1" "${2-}"; export GDPVAL_JUDGE_PANEL="$2"; shift 2 ;;
+    --judge-model) require_value "$1" "${2-}"; export GDPVAL_JUDGE_MODEL="$2"; shift 2 ;;
+    --judge-base-url) require_value "$1" "${2-}"; export GDPVAL_JUDGE_BASE_URL="$2"; shift 2 ;;
+    --judge-seed) require_value "$1" "${2-}"; export JUDGE_SAMPLING_SEED="$2"; shift 2 ;;
+    --judge-only) export JUDGE_ONLY=true; shift ;;
+    --rubric) export GDPVAL_REWARD_MODE=rubric; shift ;;
     --comparison)
       require_value "$1" "${2-}"
-      export GDPVAL_REWARD_MODE=comparison
-      export GDPVAL_REFS="$2"
+      export GDPVAL_REWARD_MODE=comparison GDPVAL_REFS="$2"
       shift 2
       ;;
-    --reference-manifest)
-      require_value "$1" "${2-}"
-      export GDPVAL_REFERENCE_MANIFEST="$2"
-      shift 2
-      ;;
-    --refs)
-      require_value "$1" "${2-}"
-      export GDPVAL_REFS="$2"
-      shift 2
-      ;;
+    --reference-manifest) require_value "$1" "${2-}"; export GDPVAL_REFERENCE_MANIFEST="$2"; shift 2 ;;
+    --refs) require_value "$1" "${2-}"; export GDPVAL_REFS="$2"; shift 2 ;;
     --aa-v2)
       require_value "$1" "${2-}"
-      export GDPVAL_COMMAND=aa-v2
-      export GDPVAL_REFS="$2"
+      export GDPVAL_COMMAND=aa-v2 GDPVAL_REFS="$2"
       shift 2
       ;;
-    --resume)
-      export RESUME=1
-      shift
-      ;;
-    --pin-gym)
-      export PIN_GYM=1
-      shift
-      ;;
-    --check)
-      export GDPVAL_COMMAND=check
-      export GDPVAL_CHECK_ONLY=1
-      shift
-      ;;
-    --a)
-      require_value "$1" "${2-}"
-      export GDPVAL_RUN_A="$2"
-      shift 2
-      ;;
-    --b)
-      require_value "$1" "${2-}"
-      export GDPVAL_RUN_B="$2"
-      shift 2
-      ;;
-    --label-a)
-      require_value "$1" "${2-}"
-      export GDPVAL_LABEL_A="$2"
-      shift 2
-      ;;
-    --label-b)
-      require_value "$1" "${2-}"
-      export GDPVAL_LABEL_B="$2"
-      shift 2
-      ;;
-    --no-metadata)
-      export GDPVAL_WRITE_METADATA=0
-      shift
-      ;;
-    -h|--help)
-      usage
-      exit 0
-      ;;
-    *)
-      echo "unknown option: $1" >&2
-      usage >&2
-      exit 2
-      ;;
+    --resume) export RESUME=1; shift ;;
+    --pin-gym) export PIN_GYM=1; shift ;;
+    --check) export GDPVAL_COMMAND=check GDPVAL_CHECK_ONLY=1; shift ;;
+    --a) require_value "$1" "${2-}"; export GDPVAL_RUN_A="$2"; shift 2 ;;
+    --b) require_value "$1" "${2-}"; export GDPVAL_RUN_B="$2"; shift 2 ;;
+    --label-a) require_value "$1" "${2-}"; export GDPVAL_LABEL_A="$2"; shift 2 ;;
+    --label-b) require_value "$1" "${2-}"; export GDPVAL_LABEL_B="$2"; shift 2 ;;
+    --no-metadata) export GDPVAL_WRITE_METADATA=0; shift ;;
+    -h|--help) usage; exit 0 ;;
+    *) echo "unknown option: $1" >&2; usage >&2; exit 2 ;;
   esac
 done
 
@@ -245,12 +142,17 @@ METADATA="$ROOT/scripts/gdpval_run_metadata.py"
 RECIPE="$ROOT/nemotron_recipes/lightning-3.5/instruct/gym/gdpval/gdpval.sh"
 AA_V2_MANIFEST="$ROOT/config/gdpval-aa-v2-references.tsv"
 
+cd "$ROOT"
+
+if [[ "${GDPVAL_COMMAND:-run}" == executors ]]; then
+  python3 -m gdpval_harness.executors.registry
+  exit 0
+fi
+
 if [[ ! -f "$PROVIDERS" ]]; then
   echo "GDPval provider helper not found: $PROVIDERS" >&2
   exit 1
 fi
-
-cd "$ROOT"
 # shellcheck source=scripts/gdpval_provider.sh
 source "$PROVIDERS"
 
@@ -272,7 +174,18 @@ if [[ ! -f "$RECIPE" ]]; then
   exit 1
 fi
 
+export GDPVAL_EXECUTOR="${GDPVAL_EXECUTOR:-stirrup}"
+
+if [[ "$GDPVAL_EXECUTOR" == stirrup && -n "${GDPVAL_EXECUTOR_TIMEOUT:-}" ]]; then
+  echo "--executor-timeout is not supported with --executor stirrup; omit it or use a local executor" >&2
+  exit 2
+fi
+
 if [[ "${GDPVAL_COMMAND:-run}" == aa-v2 ]]; then
+  if [[ "$GDPVAL_EXECUTOR" != stirrup ]]; then
+    echo "aa-v2 reproduction requires --executor stirrup" >&2
+    exit 2
+  fi
   if [[ -z "${GDPVAL_REFS:-}" ]]; then
     echo "aa-v2 requires --refs DIR" >&2
     exit 2
@@ -298,25 +211,24 @@ if [[ "${GDPVAL_COMMAND:-run}" == compare-runs ]]; then
 fi
 
 if [[ -n "${GDPVAL_PROVIDER:-}" ]]; then
+  if [[ "$GDPVAL_EXECUTOR" != stirrup ]]; then
+    echo "--provider is only valid with --executor stirrup" >&2
+    exit 2
+  fi
   gdpval_apply_provider "$GDPVAL_PROVIDER"
 fi
-if [[ -n "${GDPVAL_JUDGE_API_KEY:-}" ]]; then
-  export JUDGE_API_KEY="$GDPVAL_JUDGE_API_KEY"
-fi
-if [[ -n "${GDPVAL_JUDGE_BASE_URL:-}" ]]; then
-  export JUDGE_BASE_URL="$GDPVAL_JUDGE_BASE_URL"
-fi
-if [[ -n "${GDPVAL_JUDGE_MODEL:-}" ]]; then
-  export JUDGE_MODEL_NAME="$GDPVAL_JUDGE_MODEL"
-fi
+if [[ -n "${GDPVAL_JUDGE_API_KEY:-}" ]]; then export JUDGE_API_KEY="$GDPVAL_JUDGE_API_KEY"; fi
+if [[ -n "${GDPVAL_JUDGE_BASE_URL:-}" ]]; then export JUDGE_BASE_URL="$GDPVAL_JUDGE_BASE_URL"; fi
+if [[ -n "${GDPVAL_JUDGE_MODEL:-}" ]]; then export JUDGE_MODEL_NAME="$GDPVAL_JUDGE_MODEL"; fi
+
 "$PREFLIGHT"
 
-if [[ "${GDPVAL_CHECK_ONLY:-0}" != 0 ]]; then
-  exit 0
-fi
+if [[ "${GDPVAL_CHECK_ONLY:-0}" != 0 ]]; then exit 0; fi
+if [[ "${GDPVAL_WRITE_METADATA:-1}" != 0 ]]; then python3 "$METADATA"; fi
 
-if [[ "${GDPVAL_WRITE_METADATA:-1}" != 0 ]]; then
-  python3 "$METADATA"
+if [[ "$GDPVAL_EXECUTOR" != stirrup ]]; then
+  echo "executor '$GDPVAL_EXECUTOR' is registered but has no runner in this stack yet" >&2
+  exit 2
 fi
 
 exec bash "$RECIPE"
