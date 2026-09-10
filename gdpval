@@ -34,6 +34,7 @@ Options:
   --comparison DIR      Compare against rated reference deliverables in DIR
   --resume              Resume an interrupted run
   --pin-gym             Opt in to NVIDIA's pinned Gym revision reproduction
+  --check               Validate local prerequisites and exit without running GDPval
   -h, --help            Show this help
 
 Set GDPVAL_API_KEY to override only the policy-model API key without putting
@@ -104,6 +105,10 @@ while (( $# )); do
       export PIN_GYM=1
       shift
       ;;
+    --check)
+      export GDPVAL_CHECK_ONLY=1
+      shift
+      ;;
     -h|--help)
       usage
       exit 0
@@ -117,12 +122,23 @@ while (( $# )); do
 done
 
 ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+PREFLIGHT="$ROOT/scripts/gdpval_preflight.sh"
 RECIPE="$ROOT/nemotron_recipes/lightning-3.5/instruct/gym/gdpval/gdpval.sh"
 
+if [[ ! -x "$PREFLIGHT" ]]; then
+  echo "GDPval preflight helper not found or not executable: $PREFLIGHT" >&2
+  exit 1
+fi
 if [[ ! -f "$RECIPE" ]]; then
   echo "GDPval recipe not found: $RECIPE" >&2
   exit 1
 fi
 
 cd "$ROOT"
+"$PREFLIGHT"
+
+if [[ "${GDPVAL_CHECK_ONLY:-0}" != 0 ]]; then
+  exit 0
+fi
+
 exec bash "$RECIPE"

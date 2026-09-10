@@ -7,12 +7,22 @@ This fork exposes NVIDIA NeMo Gym's GDPval recipe through a small root-level run
 Use the existing NeMo Gym GDPval setup. In particular, a normal agent run requires:
 
 - an active Gym Python environment;
-- `env.yaml` configured for the policy model and judge endpoint;
+- `env.yaml` configured for the policy model and judge endpoint, or equivalent CLI/environment overrides;
 - the API keys required by that configuration;
 - `GDPVAL_CONTAINER_PATH` pointing to the GDPval Apptainer sandbox; and
 - `TAVILY_API_KEY` for the Stirrup agent's web search.
 
 Judge-only runs reuse existing deliverables and therefore do not require the sandbox or search key.
+
+## Preflight
+
+Validate the local environment without preparing the dataset, calling a model, or changing the checkout:
+
+```bash
+./gdpval --check
+```
+
+The same preflight runs automatically before normal evaluations. It checks the Gym CLI, required local paths, search credentials, comparison references, and whether enough policy/judge configuration is available when `env.yaml` is absent.
 
 ## Smoke test
 
