@@ -26,6 +26,7 @@ Options:
   --limit N             Run only N tasks (for example: --limit 1)
   --out DIR             Output directory (default: ./results/gdpval)
   --parallel N          Evaluator and agent concurrency
+  --provider NAME       Apply a policy-provider preset (openai, gemini, openrouter, litellm, vllm, generic)
   --model-type TYPE     Gym response model type (default: vllm_model)
   --model MODEL         Override the policy model ID from env.yaml
   --base-url URL        Override the policy model base URL from env.yaml
@@ -67,6 +68,11 @@ while (( $# )); do
     --parallel)
       require_value "$1" "${2-}"
       export PARALLEL="$2"
+      shift 2
+      ;;
+    --provider)
+      require_value "$1" "${2-}"
+      export GDPVAL_PROVIDER="$2"
       shift 2
       ;;
     --model-type)
@@ -127,10 +133,15 @@ while (( $# )); do
 done
 
 ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+PROVIDERS="$ROOT/scripts/gdpval_provider.sh"
 PREFLIGHT="$ROOT/scripts/gdpval_preflight.sh"
 METADATA="$ROOT/scripts/gdpval_run_metadata.py"
 RECIPE="$ROOT/nemotron_recipes/lightning-3.5/instruct/gym/gdpval/gdpval.sh"
 
+if [[ ! -f "$PROVIDERS" ]]; then
+  echo "GDPval provider helper not found: $PROVIDERS" >&2
+  exit 1
+fi
 if [[ ! -x "$PREFLIGHT" ]]; then
   echo "GDPval preflight helper not found or not executable: $PREFLIGHT" >&2
   exit 1
@@ -145,6 +156,11 @@ if [[ ! -f "$RECIPE" ]]; then
 fi
 
 cd "$ROOT"
+# shellcheck source=scripts/gdpval_provider.sh
+source "$PROVIDERS"
+if [[ -n "${GDPVAL_PROVIDER:-}" ]]; then
+  gdpval_apply_provider "$GDPVAL_PROVIDER"
+fi
 "$PREFLIGHT"
 
 if [[ "${GDPVAL_CHECK_ONLY:-0}" != 0 ]]; then
