@@ -24,6 +24,11 @@ _EXECUTORS = {
         runtime="Codex CLI (local)",
         usage_mode="ChatGPT subscription login only",
     ),
+    "cursor": ExecutorDescriptor(
+        name="cursor",
+        runtime="Cursor Agent CLI (local)",
+        usage_mode="Cursor account/plan usage; API-key auth rejected",
+    ),
     "stirrup": ExecutorDescriptor(
         name="stirrup",
         runtime="NeMo Gym / Stirrup",
