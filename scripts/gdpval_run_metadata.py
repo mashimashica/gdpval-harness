@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# SPDX-FileCopyrightText: Copyright (c) 2026, NVIDIA CORPORATION. All rights reserved.
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
 from __future__ import annotations
@@ -14,7 +14,9 @@ from pathlib import Path
 
 def git_value(*args: str) -> str | None:
     try:
-        return subprocess.check_output(["git", *args], text=True, stderr=subprocess.DEVNULL).strip() or None
+        return subprocess.check_output(
+            ["git", *args], text=True, errors="replace", stderr=subprocess.DEVNULL
+        ).strip() or None
     except (OSError, subprocess.CalledProcessError):
         return None
 
@@ -42,10 +44,11 @@ def main() -> None:
     command = os.getenv("GDPVAL_COMMAND", "run")
     status = git_value("status", "--porcelain")
     reference_manifest = os.getenv("GDPVAL_REFERENCE_MANIFEST")
+    condition_file = os.getenv("GDPVAL_CONDITION_FILE")
     executor = None if command == "compare-runs" else os.getenv("GDPVAL_EXECUTOR", "stirrup")
     judge_executor = os.getenv("GDPVAL_JUDGE_EXECUTOR")
     payload = {
-        "schema_version": 3,
+        "schema_version": 4,
         "created_at": datetime.now(timezone.utc).isoformat(),
         "repository": {
             "commit": git_value("rev-parse", "HEAD"),
@@ -56,6 +59,10 @@ def main() -> None:
             "command": command,
             "profile": os.getenv("GDPVAL_PROFILE"),
             "evaluation_mode": os.getenv("GDPVAL_EVALUATION_MODE"),
+            "condition": os.getenv("GDPVAL_CONDITION"),
+            "condition_file": condition_file,
+            "condition_file_sha256": sha256(Path(condition_file).expanduser()) if condition_file else None,
+            "condition_applied_to_prompt": truthy("GDPVAL_CONDITION_APPLIED"),
             "executor": executor,
             "executor_timeout_seconds": os.getenv("GDPVAL_EXECUTOR_TIMEOUT") if executor else None,
             "executor_max_turns": os.getenv("GDPVAL_EXECUTOR_MAX_TURNS") if executor else None,
