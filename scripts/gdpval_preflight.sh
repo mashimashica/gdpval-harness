@@ -52,11 +52,13 @@ fi
 if [[ -f env.yaml ]]; then
   ok "configuration: env.yaml"
 else
-  warn "env.yaml not found; policy and judge configuration must come from CLI/environment overrides"
-  [[ -n "${GDPVAL_MODEL:-}" ]] || fail "GDPVAL model is unset; pass --model or provide env.yaml"
-  [[ -n "${GDPVAL_API_KEY:-}" ]] || fail "GDPVAL_API_KEY is unset and env.yaml is absent"
-  if [[ "${GDPVAL_MODEL_TYPE:-vllm_model}" != inference_provider/* ]]; then
-    [[ -n "${GDPVAL_BASE_URL:-}" ]] || fail "policy base URL is unset; pass --base-url or provide env.yaml"
+  warn "env.yaml not found; configuration must come from CLI/environment overrides"
+  if [[ "${JUDGE_ONLY:-false}" != true ]]; then
+    [[ -n "${GDPVAL_MODEL:-}" ]] || fail "GDPVAL model is unset; pass --model or provide env.yaml"
+    [[ -n "${GDPVAL_API_KEY:-}" ]] || fail "GDPVAL_API_KEY is unset and env.yaml is absent"
+    if [[ "${GDPVAL_MODEL_TYPE:-vllm_model}" != inference_provider/* ]]; then
+      [[ -n "${GDPVAL_BASE_URL:-}" ]] || fail "policy base URL is unset; pass --base-url or provide env.yaml"
+    fi
   fi
   [[ -n "${JUDGE_API_KEY:-}" ]] || fail "JUDGE_API_KEY is unset and env.yaml is absent"
 fi
@@ -91,7 +93,18 @@ if [[ "${GDPVAL_PROFILE:-}" == aa-v2 && -z "${GDPVAL_REFERENCE_MANIFEST:-}" ]]; 
   fail "AA v2 profile requires a reference manifest"
 fi
 
-if [[ "${GDPVAL_REWARD_MODE:-rubric}" == comparison ]]; then
+if [[ "${GDPVAL_COMMAND:-run}" == compare-runs ]]; then
+  if [[ ! -d "${GDPVAL_RUN_A:-}" ]]; then
+    fail "candidate A deliverables not found: ${GDPVAL_RUN_A:-<unset>}"
+  else
+    ok "candidate A: $GDPVAL_RUN_A"
+  fi
+  if [[ ! -d "${GDPVAL_RUN_B:-}" ]]; then
+    fail "candidate B deliverables not found: ${GDPVAL_RUN_B:-<unset>}"
+  else
+    ok "candidate B: $GDPVAL_RUN_B"
+  fi
+elif [[ "${GDPVAL_REWARD_MODE:-rubric}" == comparison ]]; then
   if [[ -z "${GDPVAL_REFS:-}" ]]; then
     fail "comparison mode requires a reference directory"
   elif [[ ! -d "$GDPVAL_REFS" ]]; then
