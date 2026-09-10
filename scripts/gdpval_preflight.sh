@@ -35,6 +35,7 @@ need_command() {
 
 need_command gym
 need_command realpath
+need_command python3
 
 if [[ "${PIN_GYM:-0}" != 0 ]]; then
   need_command git
