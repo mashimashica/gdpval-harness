@@ -4,6 +4,17 @@
 
 # Provider presets only fill values that the caller has not already set.
 # Secrets stay in environment variables and are never appended to argv.
+gdpval_list_providers() {
+  cat <<'EOF'
+openai      OpenAI Responses API via openai_model
+gemini      Google Gemini OpenAI-compatible endpoint
+openrouter  OpenRouter via inference_provider
+litellm     LiteLLM proxy via litellm_model
+vllm        Local/self-hosted vLLM
+generic     Any OpenAI-compatible chat-completions endpoint
+EOF
+}
+
 gdpval_apply_provider() {
   local provider="$1"
   case "$provider" in
