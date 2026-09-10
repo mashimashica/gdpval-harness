@@ -99,6 +99,21 @@ MODE="${GDPVAL_REWARD_MODE:-rubric}"
 [ "$MODE" = rubric ] || [ "$MODE" = comparison ] ||
   { echo "GDPVAL_REWARD_MODE must be rubric or comparison (got '$MODE')" >&2; exit 1; }
 
+JUDGE_OVR=()
+case "${GDPVAL_JUDGE_PANEL:-aa-v2}" in
+  aa-v2) ;;
+  single)
+    JUDGE_OVR+=("++$GDR.judge_panel=null")
+    if [ -n "${GDPVAL_JUDGE_MODEL:-}" ]; then
+      JUDGE_OVR+=("++$GDR.judge_responses_create_params_overrides.model=$GDPVAL_JUDGE_MODEL")
+    fi
+    ;;
+  *)
+    echo "GDPVAL_JUDGE_PANEL must be aa-v2 or single" >&2
+    exit 2
+    ;;
+esac
+
 MODE_OVR=()   # rubric is the config default and needs nothing added
 if [ "$MODE" = comparison ]; then
   GDPVAL_REFS="${GDPVAL_REFS:?export GDPVAL_REFS (dir of reference deliverables)}"
@@ -156,6 +171,7 @@ gym eval run \
   "++$JUDGE.max_concurrent_requests=10" \
   ${PARALLEL:+"++$STIR.concurrency=$PARALLEL"} \
   ${MODE_OVR[@]+"${MODE_OVR[@]}"} \
+  ${JUDGE_OVR[@]+"${JUDGE_OVR[@]}"} \
   "${MODEL_OVR[@]}" \
   "++overwrite_metrics_conflicts=true" \
   ${LIMIT:+--limit "$LIMIT"} \
