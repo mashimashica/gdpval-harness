@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Iterable
 
 from gdpval_harness.executors.base import ExecutionRequest, ExecutionResult, ExecutionStatus, TaskSpec
+from gdpval_harness.executors.claude_code import ClaudeCodeExecutor
 from gdpval_harness.executors.codex import CodexExecutor
 from gdpval_harness.layout import TaskLayout, task_layout
 
@@ -28,9 +29,23 @@ def _truthy(name: str) -> bool:
     return os.getenv(name, "").lower() not in {"", "0", "false", "no"}
 
 
+def _parse_max_turns() -> int:
+    raw = os.getenv("GDPVAL_EXECUTOR_MAX_TURNS", "250")
+    try:
+        value = int(raw)
+    except ValueError as exc:
+        raise ValueError("GDPVAL_EXECUTOR_MAX_TURNS must be an integer") from exc
+    if value <= 0:
+        raise ValueError("GDPVAL_EXECUTOR_MAX_TURNS must be positive")
+    return value
+
+
 def _executor(name: str):
+    network_enabled = os.getenv("GDPVAL_EXECUTOR_NETWORK", "disabled") == "enabled"
     if name == "codex":
-        return CodexExecutor(network_enabled=os.getenv("GDPVAL_EXECUTOR_NETWORK", "disabled") == "enabled")
+        return CodexExecutor(network_enabled=network_enabled)
+    if name == "claude-code":
+        return ClaudeCodeExecutor(network_enabled=network_enabled, max_turns=_parse_max_turns())
     raise ValueError(f"local executor {name!r} is not implemented")
 
 
@@ -259,7 +274,11 @@ def _parse_timeout() -> float:
 
 
 def preflight(executor_name: str, out_dir: Path, *, for_run: bool) -> tuple[bool, dict[str, object]]:
-    executor = _executor(executor_name)
+    try:
+        executor = _executor(executor_name)
+    except ValueError as exc:
+        return False, {"executor": executor_name, "ok": False, "version": None, "auth_mode": None, "details": [str(exc)]}
+
     result = executor.preflight()
     details = list(result.details)
     ok = result.ok
@@ -275,6 +294,8 @@ def preflight(executor_name: str, out_dir: Path, *, for_run: bool) -> tuple[bool
 
     try:
         _parse_timeout()
+        if executor_name == "claude-code":
+            _parse_max_turns()
     except ValueError as exc:
         details.append(str(exc))
         ok = False
@@ -315,11 +336,12 @@ def _write_run_metadata(out_dir: Path, preflight_payload: dict[str, object]) -> 
     env["PERSIST_DELIVERABLES_DIR"] = str(out_dir / "deliverables")
     env["GDPVAL_EXECUTOR_VERSION"] = str(preflight_payload.get("version") or "")
     env["GDPVAL_EXECUTOR_AUTH_MODE"] = str(preflight_payload.get("auth_mode") or "")
-    env["GDPVAL_EXECUTOR_INVOCATION_MODE"] = getattr(_executor(str(preflight_payload["executor"])), "invocation_mode")
+    executor = _executor(str(preflight_payload["executor"]))
+    env["GDPVAL_EXECUTOR_INVOCATION_MODE"] = executor.invocation_mode
     env["GDPVAL_EXECUTOR_WORKSPACE_ISOLATION"] = "per-task-directory"
     env["GDPVAL_EXECUTOR_NETWORK"] = os.getenv("GDPVAL_EXECUTOR_NETWORK", "disabled")
-    if preflight_payload["executor"] == "codex":
-        env["GDPVAL_EXECUTOR_TOOL_PERMISSION_MODE"] = "workspace-write + approval_policy=never"
+    env["GDPVAL_EXECUTOR_TOOL_PERMISSION_MODE"] = getattr(executor, "tool_permission_mode", "")
+    env["GDPVAL_EXECUTOR_MAX_TURNS"] = os.getenv("GDPVAL_EXECUTOR_MAX_TURNS", "")
     subprocess.run([sys.executable, str(ROOT / "scripts" / "gdpval_run_metadata.py")], cwd=ROOT, env=env, check=True)
 
 

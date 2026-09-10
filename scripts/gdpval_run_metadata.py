@@ -55,6 +55,7 @@ def main() -> None:
             "profile": os.getenv("GDPVAL_PROFILE"),
             "executor": executor,
             "executor_timeout_seconds": os.getenv("GDPVAL_EXECUTOR_TIMEOUT"),
+            "executor_max_turns": os.getenv("GDPVAL_EXECUTOR_MAX_TURNS"),
             "executor_version": os.getenv("GDPVAL_EXECUTOR_VERSION"),
             "executor_invocation_mode": os.getenv("GDPVAL_EXECUTOR_INVOCATION_MODE"),
             "executor_auth_mode": os.getenv("GDPVAL_EXECUTOR_AUTH_MODE"),

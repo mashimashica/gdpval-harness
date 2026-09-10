@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# SPDX-FileCopyrightText: Copyright (c) 2026, NVIDIA CORPORATION. All rights reserved.
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
 set -euo pipefail
@@ -25,6 +25,7 @@ grep -q '^gemini ' <<<"$providers"
 grep -q '^openrouter ' <<<"$providers"
 
 executors="$(./gdpval executors)"
+grep -q '^claude-code' <<<"$executors"
 grep -q '^codex' <<<"$executors"
 grep -q '^stirrup' <<<"$executors"
 
@@ -57,9 +58,11 @@ PYTHONPYCACHEPREFIX="$pycache" python3 -m py_compile \
   gdpval_harness/local_runner.py \
   gdpval_harness/executors/__init__.py \
   gdpval_harness/executors/base.py \
+  gdpval_harness/executors/claude_code.py \
   gdpval_harness/executors/codex.py \
   gdpval_harness/executors/registry.py
 python3 -m unittest discover -s tests/harness -p 'test_*.py'
 bash tests/harness/test_codex_executor.sh
+bash tests/harness/test_claude_code_executor.sh
 
 printf 'gdpval harness self-test passed\n'
