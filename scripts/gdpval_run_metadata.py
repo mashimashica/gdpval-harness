@@ -49,6 +49,7 @@ def main() -> None:
         },
         "configuration": {
             "env_yaml_sha256": sha256(root / "env.yaml"),
+            "provider": os.getenv("GDPVAL_PROVIDER"),
             "model_type": os.getenv("GDPVAL_MODEL_TYPE", "vllm_model"),
             "model": os.getenv("GDPVAL_MODEL"),
             "base_url": os.getenv("GDPVAL_BASE_URL"),
