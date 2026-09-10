@@ -21,7 +21,7 @@ fi
 printf '%s\n' "$*" >>"${FAKE_CODEX_ARGS_LOG:?}"
 case "${1-}" in
   --version)
-    echo "codex-cli 9.9.9"
+    printf 'codex-cli 9.9.9\377\n'
     exit 0
     ;;
   login)
@@ -29,7 +29,7 @@ case "${1-}" in
       if [[ "${FAKE_CODEX_AUTH:-chatgpt}" == api ]]; then
         echo "Logged in using API key"
       else
-        echo "Logged in using ChatGPT"
+        printf '\377Logged in using ChatGPT\n'
       fi
       exit 0
     fi
@@ -51,7 +51,7 @@ case "${1-}" in
     cat >"${FAKE_CODEX_PROMPT_LOG:?}"
     mkdir -p "$workspace/deliverables/nested"
     printf 'fake deliverable\n' >"$workspace/deliverables/nested/result.txt"
-    printf '{"type":"turn.completed"}\n'
+    printf '\377{"type":"turn.completed"}\n'
     printf 'done\n' >"$final_message"
     exit 0
     ;;
@@ -89,14 +89,50 @@ grep -q '^exec ' "$args_log"
 grep -q -- '--ephemeral' "$args_log"
 grep -q -- '--sandbox workspace-write' "$args_log"
 grep -q -- '--ignore-user-config' "$args_log"
+grep -q 'forced_login_method="chatgpt"' "$args_log"
 grep -q 'approval_policy="never"' "$args_log"
 grep -q 'sandbox_workspace_write.network_access=false' "$args_log"
+grep -q 'web_search="disabled"' "$args_log"
 grep -q './deliverables/' "$prompt_log"
 grep -q '"auth_mode": "chatgpt-subscription"' "$out/tasks/task-one/executor/metadata.json"
+python3 - "$out/tasks/task-one/executor/stdout.log" <<'PY'
+from pathlib import Path
+import sys
+assert "\ufffd" in Path(sys.argv[1]).read_text(encoding="utf-8")
+PY
 if grep -R -q 'must-not-leak' "$out"; then
   echo "secret leaked into run output" >&2
   exit 1
 fi
+
+condition_file="$work/intervention.md"
+printf 'Use the externally supplied work-design method before producing the deliverable.\n' >"$condition_file"
+: >"$args_log"
+condition_out="$work/condition-run"
+PATH="$fake_bin:$PATH" \
+FAKE_CODEX_ARGS_LOG="$args_log" \
+FAKE_CODEX_PROMPT_LOG="$prompt_log" \
+GDPVAL_BENCHMARK_JSONL="$benchmark" \
+./gdpval run \
+  --executor codex \
+  --condition intervention \
+  --condition-file "$condition_file" \
+  --limit 1 \
+  --out "$condition_out"
+
+grep -q 'Additional experiment-condition instructions' "$prompt_log"
+grep -q 'externally supplied work-design method' "$prompt_log"
+python3 - "$condition_out/run-metadata.json" "$condition_file" <<'PY'
+import hashlib, json, pathlib, sys
+metadata = json.loads(pathlib.Path(sys.argv[1]).read_text())
+condition_path = pathlib.Path(sys.argv[2])
+config = metadata["configuration"]
+assert config["condition"] == "intervention"
+assert config["condition_applied_to_prompt"] is True
+assert config["condition_file"] == str(condition_path)
+assert config["condition_file_sha256"] == hashlib.sha256(condition_path.read_bytes()).hexdigest()
+assert "externally supplied work-design method" not in pathlib.Path(sys.argv[1]).read_text()
+PY
 
 : >"$args_log"
 if PATH="$fake_bin:$PATH" \
@@ -109,6 +145,20 @@ if PATH="$fake_bin:$PATH" \
 fi
 if grep -q '^exec ' "$args_log"; then
   echo "run without --limit issued a model execution" >&2
+  exit 1
+fi
+
+: >"$args_log"
+if PATH="$fake_bin:$PATH" \
+  FAKE_CODEX_ARGS_LOG="$args_log" \
+  FAKE_CODEX_PROMPT_LOG="$prompt_log" \
+  GDPVAL_BENCHMARK_JSONL="$benchmark" \
+  ./gdpval run --executor codex --condition-file "$work/missing.md" --limit 1 --out "$work/missing-condition" --no-metadata >/dev/null 2>&1; then
+  echo "missing condition file unexpectedly passed preflight" >&2
+  exit 1
+fi
+if grep -q '^exec ' "$args_log"; then
+  echo "invalid condition file issued a model execution" >&2
   exit 1
 fi
 
