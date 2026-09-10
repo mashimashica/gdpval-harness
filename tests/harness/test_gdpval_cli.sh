@@ -1,0 +1,37 @@
+#!/usr/bin/env bash
+# SPDX-FileCopyrightText: Copyright (c) 2026, NVIDIA CORPORATION. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+set -euo pipefail
+
+ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)"
+cd "$ROOT"
+
+bash -n gdpval
+bash -n scripts/gdpval_provider.sh
+bash -n scripts/gdpval_preflight.sh
+bash -n nemotron_recipes/lightning-3.5/instruct/gym/gdpval/gdpval.sh
+
+help="$(./gdpval --help)"
+grep -q './gdpval aa-v2 --refs DIR' <<<"$help"
+grep -q './gdpval compare-runs --a DIR --b DIR' <<<"$help"
+
+providers="$(./gdpval providers)"
+grep -q '^openai ' <<<"$providers"
+grep -q '^gemini ' <<<"$providers"
+grep -q '^openrouter ' <<<"$providers"
+
+overrides="$(
+  OPENAI_API_KEY=test-policy-key bash -c '
+    source scripts/gdpval_provider.sh
+    gdpval_apply_provider openai
+    printf "%s|%s|%s" "$GDPVAL_MODEL_TYPE" "$GDPVAL_BASE_URL" "$GDPVAL_API_KEY"
+  '
+)"
+[[ "$overrides" == 'openai_model|https://api.openai.com/v1|test-policy-key' ]]
+
+pycache="$(mktemp -d)"
+trap 'rm -rf "$pycache"' EXIT
+PYTHONPYCACHEPREFIX="$pycache" python3 -m py_compile scripts/gdpval_run_metadata.py
+
+printf 'gdpval harness self-test passed\n'
