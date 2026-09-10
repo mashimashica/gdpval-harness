@@ -41,6 +41,14 @@ if [[ "${PIN_GYM:-0}" != 0 ]]; then
   need_command git
 fi
 
+case "${GDPVAL_JUDGE_PANEL:-aa-v2}" in
+  aa-v2|single) ;;
+  *) fail "GDPVAL judge panel must be aa-v2 or single (got ${GDPVAL_JUDGE_PANEL})" ;;
+esac
+if [[ "${GDPVAL_JUDGE_PANEL:-aa-v2}" == aa-v2 && -n "${GDPVAL_JUDGE_MODEL:-}" ]]; then
+  warn "--judge-model applies only to --judge-panel single; AA v2 panel model IDs come from JUDGE_GPT_MODEL/JUDGE_GEMINI_MODEL/JUDGE_CLAUDE_MODEL"
+fi
+
 if [[ -f env.yaml ]]; then
   ok "configuration: env.yaml"
 else
