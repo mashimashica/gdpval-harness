@@ -18,51 +18,80 @@ set -euo pipefail
 
 usage() {
   cat <<'USAGE'
-Usage: ./gdpval [compare-runs] [options]
+Usage:
+  ./gdpval run [options]
+  ./gdpval check [options]
+  ./gdpval aa-v2 --refs DIR [options]
+  ./gdpval compare-runs --a DIR --b DIR [options]
+  ./gdpval providers
 
-Run this repository's GDPval recipe from the repository root.
+`run` is the default when the first argument is an option.
 
-Commands:
-  compare-runs          Blind-compare two existing GDPval deliverable directories
-
-Options:
-  --limit N             Run only N tasks (for example: --limit 1)
-  --out DIR             Output directory (default: ./results/gdpval)
+Core options:
+  --limit N             Run only N tasks
+  --out DIR             Output directory
   --parallel N          Evaluator and agent concurrency
-  --provider NAME       Apply a policy-provider preset (openai, gemini, openrouter, litellm, vllm, generic)
-  --model-type TYPE     Gym response model type (default: vllm_model)
-  --model MODEL         Override the policy model ID from env.yaml
-  --base-url URL        Override the policy model base URL from env.yaml
-  --judge-panel MODE    Judge mode: aa-v2 (default) or single
+  --provider NAME       Policy-provider preset
+  --model-type TYPE     Gym response model type
+  --model MODEL         Policy model ID
+  --base-url URL        Policy model base URL
+
+Judge options:
+  --judge-panel MODE    aa-v2 (default) or single
   --judge-model MODEL   Model ID for single-judge mode
-  --judge-base-url URL  Override the judge gateway base URL
-  --judge-seed N        Seed deterministic judge sampling
-  --judge-only          Re-score existing deliverables without running the agent
+  --judge-base-url URL  Judge gateway base URL
+  --judge-seed N        Deterministic judge-sampling seed
+
+Evaluation options:
   --rubric              Score against GDPval rubrics (default)
-  --comparison DIR      Compare against rated reference deliverables in DIR
+  --comparison DIR      Compare against rated reference deliverables
   --reference-manifest FILE
-                        Reference model names and Elo anchors for comparison mode
-  --aa-v2 DIR           GDPval-AA v2 profile using the pinned reference manifest
+                        Reference names and Elo anchors
+  --refs DIR            Reference directory for the `aa-v2` command
+  --aa-v2 DIR           Legacy alias for `aa-v2 --refs DIR`
+  --judge-only          Re-score existing deliverables
   --resume              Resume an interrupted run
-  --pin-gym             Opt in to NVIDIA's pinned Gym revision reproduction
-  --check               Validate local prerequisites and exit without running GDPval
-  --a DIR               compare-runs: candidate A deliverables
-  --b DIR               compare-runs: candidate B deliverables
-  --label-a LABEL       compare-runs: metadata label for candidate A
-  --label-b LABEL       compare-runs: metadata label for candidate B
-  --no-metadata         Do not write run-metadata.json before execution
+  --pin-gym             Opt in to NVIDIA's pinned Gym revision
+
+compare-runs options:
+  --a DIR               Candidate A deliverables
+  --b DIR               Candidate B deliverables
+  --label-a LABEL       Metadata label for candidate A
+  --label-b LABEL       Metadata label for candidate B
+
+Other:
+  --check               Legacy alias for the `check` command
+  --no-metadata         Do not write run-metadata.json
   -h, --help            Show this help
 
-Set GDPVAL_API_KEY to override only the policy-model API key without putting
-the secret on the command line. Judge configuration remains in env.yaml.
+Policy secrets stay in environment variables. `GDPVAL_API_KEY` overrides only
+the policy credential. `GDPVAL_JUDGE_API_KEY` overrides only the judge credential.
 USAGE
 }
 
 export GDPVAL_COMMAND=run
-if [[ "${1-}" == compare-runs ]]; then
-  export GDPVAL_COMMAND=compare-runs
-  shift
-fi
+case "${1-}" in
+  run)
+    shift
+    ;;
+  check)
+    export GDPVAL_COMMAND=check
+    export GDPVAL_CHECK_ONLY=1
+    shift
+    ;;
+  aa-v2)
+    export GDPVAL_COMMAND=aa-v2
+    shift
+    ;;
+  compare-runs)
+    export GDPVAL_COMMAND=compare-runs
+    shift
+    ;;
+  providers)
+    export GDPVAL_COMMAND=providers
+    shift
+    ;;
+esac
 
 require_value() {
   local option="$1"
@@ -149,12 +178,15 @@ while (( $# )); do
       export GDPVAL_REFERENCE_MANIFEST="$2"
       shift 2
       ;;
+    --refs)
+      require_value "$1" "${2-}"
+      export GDPVAL_REFS="$2"
+      shift 2
+      ;;
     --aa-v2)
       require_value "$1" "${2-}"
-      export GDPVAL_PROFILE=aa-v2
-      export GDPVAL_REWARD_MODE=comparison
+      export GDPVAL_COMMAND=aa-v2
       export GDPVAL_REFS="$2"
-      export GDPVAL_JUDGE_PANEL=aa-v2
       shift 2
       ;;
     --resume)
@@ -166,6 +198,7 @@ while (( $# )); do
       shift
       ;;
     --check)
+      export GDPVAL_COMMAND=check
       export GDPVAL_CHECK_ONLY=1
       shift
       ;;
@@ -216,6 +249,16 @@ if [[ ! -f "$PROVIDERS" ]]; then
   echo "GDPval provider helper not found: $PROVIDERS" >&2
   exit 1
 fi
+
+cd "$ROOT"
+# shellcheck source=scripts/gdpval_provider.sh
+source "$PROVIDERS"
+
+if [[ "${GDPVAL_COMMAND:-run}" == providers ]]; then
+  gdpval_list_providers
+  exit 0
+fi
+
 if [[ ! -x "$PREFLIGHT" ]]; then
   echo "GDPval preflight helper not found or not executable: $PREFLIGHT" >&2
   exit 1
@@ -229,7 +272,17 @@ if [[ ! -f "$RECIPE" ]]; then
   exit 1
 fi
 
-cd "$ROOT"
+if [[ "${GDPVAL_COMMAND:-run}" == aa-v2 ]]; then
+  if [[ -z "${GDPVAL_REFS:-}" ]]; then
+    echo "aa-v2 requires --refs DIR" >&2
+    exit 2
+  fi
+  export GDPVAL_PROFILE=aa-v2
+  export GDPVAL_REWARD_MODE=comparison
+  export GDPVAL_JUDGE_PANEL=aa-v2
+  export GDPVAL_REFERENCE_MANIFEST="${GDPVAL_REFERENCE_MANIFEST:-$AA_V2_MANIFEST}"
+fi
+
 if [[ "${GDPVAL_COMMAND:-run}" == compare-runs ]]; then
   if [[ -z "${GDPVAL_RUN_A:-}" || -z "${GDPVAL_RUN_B:-}" ]]; then
     echo "compare-runs requires both --a and --b" >&2
@@ -243,11 +296,7 @@ if [[ "${GDPVAL_COMMAND:-run}" == compare-runs ]]; then
   export OUT="${OUT:-./results/compare-runs}"
   unset GDPVAL_PROFILE GDPVAL_REFS GDPVAL_REFERENCE_MANIFEST
 fi
-if [[ "${GDPVAL_PROFILE:-}" == aa-v2 && -z "${GDPVAL_REFERENCE_MANIFEST:-}" ]]; then
-  export GDPVAL_REFERENCE_MANIFEST="$AA_V2_MANIFEST"
-fi
-# shellcheck source=scripts/gdpval_provider.sh
-source "$PROVIDERS"
+
 if [[ -n "${GDPVAL_PROVIDER:-}" ]]; then
   gdpval_apply_provider "$GDPVAL_PROVIDER"
 fi
