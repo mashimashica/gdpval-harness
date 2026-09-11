@@ -10,7 +10,7 @@ This repository is a focused fork of [NVIDIA NeMo Gym](https://github.com/NVIDIA
 | --- | --- | --- | --- |
 | AA-v2-compatible reproduction | NeMo Gym / Stirrup + model API | existing AA-v2-style API panel | reference-scale benchmarking |
 | Local experiment | Codex CLI / Claude Code / Cursor Agent CLI | separate | low-cost repeated artifact generation |
-| Local blind comparison | existing artifact sets | Codex CLI or Claude Code | low-cost A/B experiments |
+| Local blind comparison | existing artifact sets | Codex CLI | low-cost A/B experiments |
 | Human validation | any artifact sets | human | HITL calibration and final review |
 
 Local execution or local judging does **not** produce an official GDPval-AA v2 score.
@@ -85,13 +85,15 @@ Generate two conditions with the same executor/model/runtime, then judge the res
   --b runs/intervention/deliverables \
   --label-a plain \
   --label-b intervention \
-  --judge-executor claude-code \
+  --judge-executor codex \
   --judge-trials 2 \
   --limit 10 \
   --out runs/comparison
 ```
 
-`--judge-executor` currently supports `codex` and `claude-code`. It creates a fresh anonymous judge workspace for every task/trial, validates that candidate task sets and reference files match, removes executor bookkeeping, alternates A/B positions, and reports win/tie/loss results.
+The verified subscription-backed blind-judge path currently uses `--judge-executor codex`. It pre-validates the selected task pairs, constructs per-trial anonymous workspaces, normalizes filesystem metadata, removes candidate provenance from the judge environment, probes Codex read confinement without a model call, alternates A/B positions, and reports win/tie/loss results.
+
+`--judge-executor claude-code` is intentionally fail-closed for blind judging at present. Claude Code remains fully supported as a policy executor, but the harness does not issue a Claude judge model call unless filesystem read confinement can first be verified through a documented non-model runtime probe. Use Codex or human validation for blind judging meanwhile.
 
 Using the same executor/model family for generation and judging can introduce evaluator dependence. The comparison summary records when the candidate run metadata identifies the same executor as the local judge. Cross-family judging or human validation is recommended for stronger claims.
 
