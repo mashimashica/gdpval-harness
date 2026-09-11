@@ -7,6 +7,7 @@ import os
 import shutil
 import subprocess
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Mapping
 
 from gdpval_harness.executors.base import (
@@ -36,6 +37,15 @@ def _text(value: str | bytes | None) -> str:
     if value is None:
         return ""
     return value.decode(errors="replace") if isinstance(value, bytes) else value
+
+
+def _read_output_text(path: Path) -> str | None:
+    try:
+        if not path.is_file():
+            return None
+        return path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return None
 
 
 def subscription_environment(base: Mapping[str, str] | None = None) -> dict[str, str]:
@@ -173,6 +183,7 @@ class CodexExecutor(Executor):
         command = self.build_command(request)
         stdout_path = request.executor_dir / "stdout.log"
         stderr_path = request.executor_dir / "stderr.log"
+        final_message_path = request.executor_dir / "final-message.txt"
         prompt_path = request.executor_dir / "prompt.txt"
         prompt_path.write_text(request.task.prompt, encoding="utf-8")
         exit_code: int | None = None
@@ -214,6 +225,7 @@ class CodexExecutor(Executor):
             stdout_path.write_text(stdout, encoding="utf-8")
             stderr_path.write_text(stderr, encoding="utf-8")
 
+        output_text = _read_output_text(final_message_path)
         return ExecutionResult(
             task_id=request.task.task_id,
             executor=self.name,
@@ -226,6 +238,7 @@ class CodexExecutor(Executor):
             started_at=started_at,
             finished_at=_utc_now(),
             exit_code=exit_code,
+            output_text=output_text,
             metadata={
                 "sandbox": "workspace-write",
                 "tool_permission_mode": self.tool_permission_mode,
@@ -235,6 +248,7 @@ class CodexExecutor(Executor):
                 "structured_output": "jsonl",
                 "session_persistence": "ephemeral",
                 "forced_login_method": "chatgpt",
+                "output_text_source": "executor/final-message.txt",
                 "api_environment_removed": sorted(_API_ENV_VARS),
                 "command": command,
             },

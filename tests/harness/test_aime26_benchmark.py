@@ -1,0 +1,122 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+from __future__ import annotations
+
+import json
+import tempfile
+import unittest
+from pathlib import Path
+from unittest.mock import patch
+
+from gdpval_harness.benchmarks.aime26 import AIME26Benchmark
+from gdpval_harness.benchmarks.base import EvaluatorType
+from gdpval_harness.executors.base import ExecutionResult, ExecutionStatus
+
+
+class AIME26BenchmarkTests(unittest.TestCase):
+    def benchmark(self, root: Path) -> AIME26Benchmark:
+        return AIME26Benchmark(
+            root=root,
+            dataset_path=root / "aime26.jsonl",
+            prepare_script=root / "prepare.py",
+        )
+
+    def execution_result(
+        self,
+        root: Path,
+        *,
+        output_text: str | None,
+        status: ExecutionStatus = ExecutionStatus.NO_DELIVERABLE,
+    ) -> ExecutionResult:
+        return ExecutionResult(
+            task_id="aime26-01",
+            executor="codex",
+            executor_version="test",
+            invocation_mode="codex exec",
+            auth_mode="chatgpt-subscription",
+            workspace=root / "workspace",
+            deliverables_dir=root / "workspace" / "deliverables",
+            status=status,
+            started_at="2026-09-11T00:00:00+00:00",
+            finished_at="2026-09-11T00:00:01+00:00",
+            exit_code=0 if status is ExecutionStatus.NO_DELIVERABLE else 1,
+            output_text=output_text,
+        )
+
+    def test_load_tasks_preserves_native_math_prompt_and_expected_answer(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            benchmark = self.benchmark(root)
+            benchmark.dataset_path.write_text(
+                json.dumps({"question": "What is 6*7?", "expected_answer": "42"}) + "\n",
+                encoding="utf-8",
+            )
+
+            task = benchmark.load_tasks(1)[0]
+
+            self.assertEqual(task.execution.task_id, "aime26-01")
+            self.assertEqual(
+                task.execution.prompt,
+                "Solve the following math problem. Make sure to put the answer (and only answer) "
+                "inside \\boxed{}.\n\nWhat is 6*7?",
+            )
+            self.assertEqual(task.evaluation["expected_answer"], "42")
+            self.assertEqual(benchmark.evaluator_type, EvaluatorType.BENCHMARK_NATIVE)
+
+    def test_evaluate_uses_native_library_verifier_without_llm_fallback(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            benchmark = self.benchmark(root)
+            benchmark.dataset_path.write_text(
+                json.dumps({"question": "What is 6*7?", "expected_answer": "42"}) + "\n",
+                encoding="utf-8",
+            )
+            task = benchmark.load_tasks(1)[0]
+            result = self.execution_result(root, output_text="Reasoning... \\boxed{42}")
+
+            with patch(
+                "gdpval_harness.benchmarks.aime26._native_math_evaluate",
+                return_value=(1.0, "42"),
+            ) as verifier:
+                evaluation = benchmark.evaluate(task, result)
+
+            verifier.assert_called_once_with("42", "Reasoning... \\boxed{42}")
+            self.assertEqual(evaluation.metrics, {"accuracy": 1.0})
+            self.assertEqual(evaluation.details["extracted_answer"], "42")
+            self.assertFalse(evaluation.details["llm_judge_used"])
+
+    def test_failed_execution_scores_zero_without_calling_verifier(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            benchmark = self.benchmark(root)
+            benchmark.dataset_path.write_text(
+                json.dumps({"question": "What is 6*7?", "expected_answer": "42"}) + "\n",
+                encoding="utf-8",
+            )
+            task = benchmark.load_tasks(1)[0]
+            result = self.execution_result(root, output_text="\\boxed{42}", status=ExecutionStatus.FAILED)
+
+            with patch("gdpval_harness.benchmarks.aime26._native_math_evaluate") as verifier:
+                evaluation = benchmark.evaluate(task, result)
+
+            verifier.assert_not_called()
+            self.assertEqual(evaluation.metrics, {"accuracy": 0.0})
+            self.assertEqual(evaluation.details["execution_status"], "failed")
+
+    def test_materialize_creates_workspace_without_benchmark_files(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            benchmark = self.benchmark(root)
+            workspace = root / "workspace"
+            benchmark.dataset_path.write_text(
+                json.dumps({"question": "q", "expected_answer": "1"}) + "\n",
+                encoding="utf-8",
+            )
+            task = benchmark.load_tasks(1)[0]
+            self.assertEqual(benchmark.materialize(task, workspace), [])
+            self.assertTrue(workspace.is_dir())
+
+
+if __name__ == "__main__":
+    unittest.main()

@@ -9,7 +9,7 @@ from enum import StrEnum
 from pathlib import Path
 from typing import Mapping, Sequence
 
-from gdpval_harness.executors.base import TaskSpec
+from gdpval_harness.executors.base import ExecutionResult, TaskSpec
 
 
 class EvaluatorType(StrEnum):
@@ -26,6 +26,15 @@ class BenchmarkTask:
     execution: TaskSpec
     materialization: Mapping[str, object] = field(default_factory=dict)
     evaluation: Mapping[str, object] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class BenchmarkEvaluation:
+    """Generic result envelope; metric names and meanings remain benchmark-owned."""
+
+    task_id: str
+    metrics: Mapping[str, float]
+    details: Mapping[str, object] = field(default_factory=dict)
 
 
 class Benchmark(ABC):
@@ -50,3 +59,7 @@ class Benchmark(ABC):
     @abstractmethod
     def materialize(self, task: BenchmarkTask, workspace: Path) -> Sequence[str]:
         """Materialize benchmark-owned executor inputs into a task workspace."""
+
+    def evaluate(self, task: BenchmarkTask, result: ExecutionResult) -> BenchmarkEvaluation:
+        """Evaluate one execution when the benchmark supports direct local evaluation."""
+        raise NotImplementedError(f"{self.name} does not expose direct local evaluation through this adapter")

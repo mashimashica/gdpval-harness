@@ -3,9 +3,11 @@
 
 from __future__ import annotations
 
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from gdpval_harness.executors.base import ExecutionRequest, TaskSpec
 from gdpval_harness.executors.codex import CodexExecutor, subscription_environment
@@ -62,6 +64,31 @@ class CodexExecutorTests(unittest.TestCase):
         self.assertNotIn("OPENAI_API_KEY", env)
         self.assertNotIn("CODEX_ACCESS_TOKEN", env)
         self.assertEqual(env["KEEP_ME"], "yes")
+
+    def test_execute_collects_final_message_as_output_text_with_replacement_decoding(self) -> None:
+        with tempfile.TemporaryDirectory() as root:
+            base = Path(root)
+            request = ExecutionRequest(
+                task=TaskSpec(task_id="t", prompt="solve"),
+                workspace=base / "workspace",
+                deliverables_dir=base / "workspace" / "deliverables",
+                executor_dir=base / "executor",
+            )
+            executor = CodexExecutor(network_enabled=False)
+            executor._version = "codex-test"
+
+            def fake_run(command, **kwargs):
+                del kwargs
+                output_path = Path(command[command.index("--output-last-message") + 1])
+                output_path.parent.mkdir(parents=True, exist_ok=True)
+                output_path.write_bytes(b"final \\boxed{42} \xff\n")
+                return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+
+            with patch("gdpval_harness.executors.codex.subprocess.run", side_effect=fake_run):
+                result = executor.execute(request)
+
+            self.assertEqual(result.output_text, "final \\boxed{42} \ufffd\n")
+            self.assertEqual(result.metadata["output_text_source"], "executor/final-message.txt")
 
 
 if __name__ == "__main__":

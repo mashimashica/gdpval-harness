@@ -50,6 +50,7 @@ class ExecutionResult:
     started_at: str
     finished_at: str
     exit_code: int | None
+    output_text: str | None = None
     metadata: Mapping[str, object] = field(default_factory=dict)
 
 
