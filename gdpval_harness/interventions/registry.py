@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from gdpval_harness.interventions.agent_skill import AgentSkillIntervention
 from gdpval_harness.interventions.base import Intervention, InterventionType
 from gdpval_harness.interventions.files import FilesIntervention
 from gdpval_harness.interventions.none import NoneIntervention
@@ -42,6 +43,12 @@ def create_intervention(
         )
     if kind is InterventionType.FILES:
         return FilesIntervention(Path(source), intervention_id=intervention_id, source_revision=source_revision)
+    if kind is InterventionType.AGENT_SKILL:
+        return AgentSkillIntervention.from_source(
+            source,
+            intervention_id=intervention_id,
+            source_revision=source_revision,
+        )
     raise AssertionError(f"unhandled intervention type: {kind}")
 
 

@@ -29,6 +29,7 @@ from gdpval_harness.interventions.base import (
     Intervention,
     InterventionApplication,
     InterventionPreflightResult,
+    ensure_source_output_separation,
 )
 from gdpval_harness.interventions.none import NoneIntervention
 from gdpval_harness.layout import task_layout
@@ -262,7 +263,7 @@ def _intervention_metadata(
         if manifest is not None
         else []
     )
-    return {
+    descriptor: dict[str, object] = {
         "id": intervention_id,
         "type": intervention_type,
         "revision": source_revision,
@@ -278,6 +279,10 @@ def _intervention_metadata(
             else {"method": None, "target": None}
         ),
     }
+    source_reference = getattr(intervention, "source_reference", None)
+    if isinstance(source_reference, str) and source_reference and "\x00" not in source_reference:
+        descriptor["source_reference"] = source_reference
+    return descriptor
 
 
 def _intervention_application_payload(
@@ -381,6 +386,9 @@ def run_benchmark(
     intervention_preflight = intervention.preflight()
     if not intervention_preflight.ok:
         raise _preflight_failure(getattr(intervention, "name", "intervention"), intervention_preflight.details)
+    intervention_bundle = intervention_preflight.bundle
+    if intervention_bundle is not None and isinstance(intervention_bundle.root, Path):
+        ensure_source_output_separation(intervention_bundle, out_dir)
 
     executor_preflight = executor.preflight()
     if not executor_preflight.ok:

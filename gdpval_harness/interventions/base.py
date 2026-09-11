@@ -26,6 +26,7 @@ class InterventionType(StrEnum):
     NONE = "none"
     PROMPT_OVERLAY = "prompt-overlay"
     FILES = "files"
+    AGENT_SKILL = "agent-skill"
 
 
 def _validate_sha256(label: str, value: str) -> None:
@@ -287,6 +288,30 @@ def ensure_destination_parents(workspace: Path, logical_paths: Sequence[str]) ->
             raise FileExistsError(f"intervention destination already exists: {destination}")
 
 
+def ensure_source_output_separation(bundle: InterventionBundle, output: Path) -> None:
+    """Reject source/output paths that overlap after symlink-aware resolution.
+
+    ``output`` may be a planned path that does not exist yet, so it is resolved
+    with ``strict=False`` while existing source components are resolved
+    strictly.  This check is intentionally independent of any intervention's
+    destination layout and can be used before an output directory is created.
+    """
+
+    if not isinstance(bundle, InterventionBundle) or not isinstance(bundle.root, Path):
+        raise ValueError("intervention bundle must have a filesystem source root")
+    source = bundle.root
+    if source.is_symlink():
+        raise ValueError("intervention source root must not be a symlink")
+    source_resolved = source.resolve(strict=True)
+    output_resolved = Path(output).resolve(strict=False)
+    if (
+        source_resolved == output_resolved
+        or source_resolved in output_resolved.parents
+        or output_resolved in source_resolved.parents
+    ):
+        raise ValueError("intervention source and output paths must be separate")
+
+
 def fsync_directory(path: Path) -> None:
     """Fsync a directory where the host platform exposes directory handles."""
 
@@ -320,6 +345,7 @@ __all__ = [
     "canonical_manifest_bytes",
     "compute_bundle_sha256",
     "ensure_destination_parents",
+    "ensure_source_output_separation",
     "file_evidence",
     "fsync_directory",
     "revision_fields",

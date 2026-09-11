@@ -29,6 +29,7 @@ from gdpval_harness.executors.base import (
     PreflightResult,
     TaskSpec,
 )
+from gdpval_harness.interventions.agent_skill import AgentSkillIntervention, load_agent_skill_bundle
 from gdpval_harness.interventions.base import (
     ApplicationMapping,
     Intervention,
@@ -123,7 +124,7 @@ class FakeIntervention(Intervention):
             bundle_sha256=compute_bundle_sha256(((entry.path, content),)),
             application=ApplicationMapping(method="prompt-overlay", target="task.prompt"),
         )
-        self._bundle = InterventionBundle(root=Path("/external/secret/intervention-source"), manifest=manifest)
+        self._bundle = InterventionBundle(root=Path(__file__).resolve().parent, manifest=manifest)
         return InterventionPreflightResult(
             name=self.name,
             intervention_type=self.intervention_type,
@@ -229,9 +230,11 @@ class FakeExecutor(Executor):
         self.events = events if events is not None else []
         self.tasks: list[TaskSpec] = []
         self.environments: list[dict[str, str]] = []
+        self.preflight_calls = 0
 
     def preflight(self) -> PreflightResult:
         self.events.append("executor-preflight")
+        self.preflight_calls += 1
         return PreflightResult(
             executor=self.name,
             ok=True,
@@ -356,6 +359,220 @@ class GenericRunnerTests(unittest.TestCase):
             self.assertNotIn("/external/secret/intervention-source", json.dumps(row))
             self.assertNotIn("sentinel", json.dumps(row))
             self.assertNotIn("task-0", evidence["application_run_id"])
+
+    def test_agent_skill_workspace_reference_is_portable_and_outer_only_source_provenance(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source_parent = root / "source-parent-sentinel"
+            skill_dir = source_parent / "demo-skill-sentinel"
+            references_dir = skill_dir / "references"
+            references_dir.mkdir(parents=True)
+            skill_content = (
+                "---\n"
+                "name: demo-skill-sentinel\n"
+                "description: A deterministic workspace reference test skill.\n"
+                "---\n\n"
+                "# skill-content-sentinel\n\n"
+                "Use this reviewed skill.\n"
+            )
+            resource_content = "resource-content-sentinel\n"
+            (skill_dir / "SKILL.md").write_text(skill_content, encoding="utf-8")
+            (references_dir / "guide.txt").write_text(resource_content, encoding="utf-8")
+            source_reference = str(skill_dir.resolve())
+            intervention_id = "agent-skill-id-sentinel"
+            source_revision = "agent-skill-revision-sentinel"
+            bundle = load_agent_skill_bundle(
+                skill_dir,
+                intervention_id=intervention_id,
+                source_revision=source_revision,
+            )
+            intervention = AgentSkillIntervention(bundle, source_reference=source_reference)
+            benchmark = FakeBenchmark(evaluation_metadata={"evaluation-metadata-sentinel": "secret"})
+            executor = FakeExecutor()
+
+            with patch.dict(
+                os.environ,
+                {
+                    "GDPVAL_CONDITION": "condition-label-sentinel",
+                    "GDPVAL_CONDITION_FILE": str(root / "condition-source-sentinel"),
+                    "GDPVAL_CONDITION_APPLIED": "true",
+                },
+            ):
+                run_benchmark(
+                    benchmark,
+                    FakeEvaluator(),
+                    executor,
+                    out_dir=root / "run",
+                    limit=1,
+                    intervention=intervention,
+                )
+
+            run_dir = root / "run"
+            derived_prompt = executor.tasks[0].prompt
+            skill_reference = ".gdpval/interventions/demo-skill-sentinel/SKILL.md"
+            self.assertIn(skill_reference, derived_prompt)
+            self.assertIn("prompt-0", derived_prompt)
+            for value in (
+                source_reference,
+                intervention_id,
+                source_revision,
+                "evaluation-metadata-sentinel",
+                "condition-label-sentinel",
+            ):
+                self.assertNotIn(value, derived_prompt)
+            self.assertEqual(
+                (run_dir / "tasks" / "task-0" / "executor" / "task-prompt.txt").read_text(encoding="utf-8"),
+                "prompt-0",
+            )
+
+            workspace = run_dir / "tasks" / "task-0" / "workspace"
+            workspace_files = sorted(
+                path.relative_to(workspace).as_posix() for path in workspace.rglob("*") if path.is_file()
+            )
+            workspace_contents = {
+                path: (workspace / path).read_text(encoding="utf-8") for path in workspace_files
+            }
+            self.assertIn(skill_reference, workspace_files)
+            self.assertIn(".gdpval/interventions/demo-skill-sentinel/references/guide.txt", workspace_files)
+            self.assertEqual(workspace_contents[skill_reference], skill_content)
+            self.assertEqual(
+                workspace_contents[".gdpval/interventions/demo-skill-sentinel/references/guide.txt"],
+                resource_content,
+            )
+            serialized_workspace = json.dumps({"files": workspace_files, "contents": workspace_contents})
+            for value in (
+                source_reference,
+                intervention_id,
+                source_revision,
+                "evaluation-metadata-sentinel",
+                "condition-label-sentinel",
+            ):
+                self.assertNotIn(value, serialized_workspace)
+
+            executor_environment = executor.environments[0]
+            for key in ("GDPVAL_CONDITION", "GDPVAL_CONDITION_FILE", "GDPVAL_CONDITION_APPLIED"):
+                self.assertNotIn(key, executor_environment)
+            serialized_environment = json.dumps(executor_environment)
+            for value in (
+                source_reference,
+                intervention_id,
+                source_revision,
+                "evaluation-metadata-sentinel",
+                "condition-label-sentinel",
+            ):
+                self.assertNotIn(value, serialized_environment)
+
+            metadata = json.loads((run_dir / "run-metadata.json").read_text(encoding="utf-8"))
+            descriptor = metadata["intervention"]
+            self.assertEqual(descriptor["source_reference"], source_reference)
+            self.assertEqual(descriptor["id"], intervention_id)
+            self.assertEqual(descriptor["revision"], source_revision)
+            self.assertTrue(descriptor["bundle_sha256"])
+            self.assertTrue(descriptor["manifest_sha256"])
+            self.assertIn(source_reference, json.dumps(metadata))
+
+            row = json.loads((run_dir / "results.jsonl").read_text(encoding="utf-8"))
+            task_result = json.loads((run_dir / "tasks" / "task-0" / "result.json").read_text(encoding="utf-8"))
+            for payload in (row, task_result):
+                serialized = json.dumps(payload)
+                self.assertNotIn(source_reference, serialized)
+                self.assertNotIn("source_reference", payload["intervention"])
+                self.assertNotIn("evaluation-metadata-sentinel", serialized)
+                self.assertNotIn("condition-label-sentinel", serialized)
+            self.assertEqual(row["intervention"]["id"], intervention_id)
+            self.assertEqual(row["intervention"]["revision"], source_revision)
+            self.assertEqual(
+                row["intervention"]["application"],
+                {"method": "workspace-reference", "target": skill_reference},
+            )
+            self.assertIn(skill_reference, {item["path"] for item in row["intervention"]["materialized_files"]})
+
+    def test_agent_skill_source_output_overlap_fails_before_executor_and_preserves_source(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source_parent = root / "source-parent-sentinel"
+            skill_dir = source_parent / "demo-skill-sentinel"
+            skill_dir.mkdir(parents=True)
+            (skill_dir / "SKILL.md").write_text(
+                "---\nname: demo-skill-sentinel\ndescription: overlap test\n---\n",
+                encoding="utf-8",
+            )
+            (skill_dir / "resource.txt").write_text("resource-sentinel\n", encoding="utf-8")
+            before = {
+                path.relative_to(source_parent).as_posix(): path.read_bytes()
+                for path in source_parent.rglob("*")
+                if path.is_file()
+            }
+            alias = root / "source-alias-sentinel"
+            alias.symlink_to(source_parent, target_is_directory=True)
+
+            for output in (skill_dir / "run-output", alias / skill_dir.name / "run-output"):
+                intervention = AgentSkillIntervention(
+                    load_agent_skill_bundle(skill_dir),
+                    source_reference=str(skill_dir.resolve()),
+                )
+                executor = FakeExecutor()
+                with self.assertRaisesRegex(ValueError, "source and output paths must be separate"):
+                    run_benchmark(
+                        FakeBenchmark(task_count=1),
+                        FakeEvaluator(),
+                        executor,
+                        out_dir=output,
+                        limit=1,
+                        intervention=intervention,
+                    )
+                self.assertEqual(executor.preflight_calls, 0)
+                self.assertEqual(executor.calls, 0)
+                self.assertFalse(output.exists())
+                self.assertFalse((output / "run-metadata.json").exists())
+                self.assertFalse((output / "tasks").exists())
+
+            after = {
+                path.relative_to(source_parent).as_posix(): path.read_bytes()
+                for path in source_parent.rglob("*")
+                if path.is_file()
+            }
+            self.assertEqual(before, after)
+
+    def test_agent_skill_relative_output_path_materializes_reference(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            skill_dir = root / "relative-skill"
+            skill_dir.mkdir()
+            (skill_dir / "SKILL.md").write_text(
+                "---\nname: relative-skill\ndescription: relative output test\n---\n",
+                encoding="utf-8",
+            )
+            intervention = AgentSkillIntervention(load_agent_skill_bundle(skill_dir))
+            original_cwd = Path.cwd()
+            try:
+                os.chdir(root)
+                run_benchmark(
+                    FakeBenchmark(task_count=1),
+                    FakeEvaluator(),
+                    FakeExecutor(),
+                    out_dir=Path("relative-run"),
+                    limit=1,
+                    intervention=intervention,
+                )
+            finally:
+                os.chdir(original_cwd)
+
+            target = (
+                root
+                / "relative-run"
+                / "tasks"
+                / "task-0"
+                / "workspace"
+                / ".gdpval"
+                / "interventions"
+                / "relative-skill"
+                / "SKILL.md"
+            )
+            self.assertEqual(
+                target.read_text(encoding="utf-8"),
+                (skill_dir / "SKILL.md").read_text(encoding="utf-8"),
+            )
 
     def test_none_intervention_is_the_default_identity_application(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

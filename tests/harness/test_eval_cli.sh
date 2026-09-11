@@ -17,6 +17,8 @@ grep -q 'run' <<<"$help"
 run_help="$(./eval run --help)"
 grep -q -- '--intervention' <<<"$run_help"
 grep -q -- '--intervention-source' <<<"$run_help"
+grep -q 'agent-skill' <<<"$run_help"
+grep -q 'workspace-reference' <<<"$run_help"
 
 benchmarks="$(./eval benchmarks)"
 grep -q '^aime26' <<<"$benchmarks"
@@ -54,6 +56,11 @@ fi
 if ./eval run aime26 --executor codex --limit 1 \
   --intervention none --intervention-source /tmp/unused >/dev/null 2>&1; then
   echo "generic eval unexpectedly accepted a source for the none intervention" >&2
+  exit 1
+fi
+if ./eval run aime26 --executor codex --limit 1 \
+  --intervention agent-skill >/dev/null 2>&1; then
+  echo "generic eval unexpectedly accepted a missing agent-skill source" >&2
   exit 1
 fi
 

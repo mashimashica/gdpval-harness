@@ -38,9 +38,12 @@ def _parser() -> argparse.ArgumentParser:
     run_parser.add_argument("--claude-max-turns", type=int, default=250)
     run_parser.add_argument(
         "--intervention",
-        choices=("none", "prompt-overlay", "files"),
+        choices=("none", "prompt-overlay", "files", "agent-skill"),
         default="none",
-        help="Apply a registered intervention before execution (default: none)",
+        help=(
+            "Apply a registered intervention before execution; agent-skill uses the portable "
+            "workspace-reference method (default: none)"
+        ),
     )
     run_parser.add_argument(
         "--intervention-source",
