@@ -60,6 +60,8 @@ Run one task:
 
 The harness uses `claude -p`, JSON output, disabled session persistence, `--safe-mode`, a restricted built-in tool set, and a Bash sandbox with `failIfUnavailable=true` and `allowUnsandboxedCommands=false`. Model-generated network access uses a strict empty allowlist by default. `GDPVAL_EXECUTOR_MAX_TURNS` controls Claude Code's `--max-turns` and defaults to 250.
 
+Claude Code is currently supported as a **policy executor**, not as a verified blind judge. Blind judging needs a read boundary that can be verified before the first subscription-backed model call. The harness cannot currently verify Claude Code's `denyRead`/`allowRead` behavior with a documented non-model CLI probe, so `--judge-executor claude-code` fails closed after authentication checks and before `claude -p` is invoked.
+
 ## Cursor Agent CLI
 
 Official references:
@@ -129,7 +131,7 @@ The same flag applies to Claude Code and Cursor, using each runtime's own sandbo
 
 ## Local subscription-backed judging
 
-A local policy executor does not automatically judge its own output. Two completed deliverable sets can instead be compared with a separate subscription-backed judge:
+A local policy executor does not automatically judge its own output. The currently verified subscription-backed blind-judge path is Codex CLI:
 
 ```bash
 ./gdpval compare-runs \
@@ -143,13 +145,13 @@ A local policy executor does not automatically judge its own output. Two complet
   --out runs/comparison
 ```
 
-Use `--judge-executor claude-code` for the Claude Code judge path. The same subscription-authentication checks and API credential scrubbing rules apply to judging as to policy execution.
+Before the first subscription-backed judge call, the harness validates **all selected task pairs**: task sets must match, reference files must be identical, judged trees must be readable and symlink-free, and the recorded GDPval task must match the current benchmark prompt. Runs that do not retain sufficient prompt provenance are rejected rather than judged against an assumed current task.
 
-Before the first subscription-backed judge call, the harness validates **all selected task pairs**: task sets must match, reference files must be identical, judged trees must be readable and symlink-free, and the original GDPval task recorded in each candidate's `tasks/<id>/executor/prompt.txt` must match the current benchmark prompt. This prevents a later invalid pair or dataset/prompt drift from consuming earlier judge quota before failing. Runs that do not retain this prompt provenance are rejected rather than judged against an assumed current task.
+Each trial uses a fresh anonymous workspace outside the candidate/output trees. Candidate paths, labels, and unrelated parent secrets are omitted from the judge subprocess environment. Anonymous files are copied without source metadata and normalized to fixed read-only modes and timestamps. Codex preflight performs a non-model permission-profile probe that must read an in-workspace control file and fail to read an outside secret; otherwise judging fails closed.
 
-The local judge path requires an explicit positive `--limit`; creates a fresh anonymous judge workspace for each task/trial; excludes executor bookkeeping; deterministically randomizes the first A/B placement and alternates later trials; and accepts only a standalone final `BOXED[A]`, `BOXED[B]`, or `BOXED[TIE]` verdict. Completed trial rows are flushed immediately to `local-judge-results.jsonl`, so already-consumed judge work survives a later executor failure or interruption.
+The local judge path requires an explicit positive `--limit`, excludes executor bookkeeping, deterministically randomizes the initial A/B placement and alternates later trials, and accepts only a standalone final `BOXED[A]`, `BOXED[B]`, or `BOXED[TIE]` verdict. Completed trial rows are flushed immediately to `local-judge-results.jsonl`. A timeout, launch failure, or nonzero judge exit stops further subscription-backed trials after preserving the failed row/logs. A user interruption preserves partial logs/results and exits with status 130.
 
-Codex judging uses an ephemeral read-only sandbox. Claude Code judging uses a fail-closed sandbox with an empty network allowlist and an OS-enforced `filesystem.denyWrite` rule for the anonymous judge workspace. Judge stdout/stderr and per-trial metadata are kept outside the anonymous submissions.
+`--judge-executor claude-code` is intentionally fail-closed at present. Authentication can be checked without a model call, but the harness does not accept Claude Code as a blind judge until read confinement can also be verified without consuming a model request. Use Codex or human validation instead.
 
 Local judge results are always labeled `official_gdpval_aa_v2=false`; they are not placed on the AA-v2 Elo scale.
 
