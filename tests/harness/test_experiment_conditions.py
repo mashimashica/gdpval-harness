@@ -163,13 +163,16 @@ class ExperimentConditionTests(unittest.TestCase):
         self.assertNotIn('web_search="disabled"', " ".join(command))
         self.assertIn('forced_login_method="chatgpt"', " ".join(command))
 
-    def test_codex_judge_forces_chatgpt_and_disables_web_search(self) -> None:
+    def test_codex_judge_forces_chatgpt_disables_web_and_keeps_read_profile(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             command = CodexJudgeExecutor().build_command(self._judge_request(Path(tmp)))
         joined = " ".join(command)
         self.assertIn('forced_login_method="chatgpt"', joined)
         self.assertIn('web_search="disabled"', joined)
-        self.assertIn("--sandbox read-only", joined)
+        self.assertIn('default_permissions="gdpval-harness-blind-judge"', joined)
+        self.assertIn('":root"="deny"', joined)
+        self.assertIn('":minimal"="read"', joined)
+        self.assertNotIn("--sandbox read-only", joined)
 
 
 if __name__ == "__main__":
