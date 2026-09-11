@@ -84,8 +84,6 @@ def _judge_environment(runtime_tmp: Path | None = None) -> dict[str, str]:
     env = {name: value for name in _JUDGE_ENV_ALLOWLIST if (value := os.getenv(name)) is not None}
     if runtime_tmp is not None:
         value = str(runtime_tmp)
-        # Keep any CLI-created temporary files inside the already-anonymous,
-        # per-trial temp root rather than honoring caller-controlled temp paths.
         env.update({"TMPDIR": value, "TMP": value, "TEMP": value})
     return env
 
@@ -202,8 +200,6 @@ def _candidate_task_prompt(deliverables: Path, task_key: str) -> str:
     if _TASK_PROMPT_MARKER not in raw:
         raise ValueError(f"candidate executor prompt for {task_key} does not contain the GDPval task marker")
     recorded = raw.split(_TASK_PROMPT_MARKER, 1)[1]
-    # build_task_prompt contributes exactly one wrapper LF after the task.
-    # Remove only that byte; do not normalize task-owned CR/LF sequences.
     if recorded.endswith(b"\n"):
         recorded = recorded[:-1]
     return recorded.decode("utf-8", errors="replace")
@@ -282,8 +278,6 @@ def _preflight(for_run: bool) -> tuple[bool, dict[str, object]]:
     ok = True
     try:
         judge = _judge_executor(judge_name)
-        # Version/login checks receive the same provenance-free environment
-        # used by model invocations. They never see GDPVAL_RUN_*/labels.
         auth = judge.preflight(_judge_environment())
         ok = auth.ok
         details.extend(auth.details)
@@ -383,6 +377,24 @@ def _persist_executor_logs(out_dir: Path, task_key: str, trial_index: int, sourc
     write_trial_metadata(target / "metadata.json", row)
 
 
+def _interrupted_row(task_key: str, trial_index: int, swapped: bool, preflight: dict[str, object]) -> dict[str, object]:
+    return {
+        "task_id": task_key.removeprefix("task_"),
+        "trial_index": trial_index,
+        "swapped": swapped,
+        "blind_verdict": None,
+        "normalized_verdict": None,
+        "judge_executor": preflight["judge_executor"],
+        "judge_executor_version": preflight.get("version"),
+        "judge_auth_mode": preflight.get("auth_mode"),
+        "judge_model": os.getenv("GDPVAL_JUDGE_MODEL"),
+        "exit_code": 130,
+        "started_at": None,
+        "finished_at": None,
+        "metadata": {"interrupted": True},
+    }
+
+
 def run() -> int:
     ok, preflight = _preflight(for_run=True)
     for detail in preflight["details"]:
@@ -418,10 +430,11 @@ def run() -> int:
     results_path = out_dir / "local-judge-results.jsonl"
     normalized_verdicts: list[Verdict] = []
     invalid_trials = 0
+    interrupted = False
+    systemic_failure: str | None = None
 
-    # Each trial gets a separate temp root so a judge cannot inspect a sibling
-    # trial and correlate the deterministic A/B position swap across trials.
     with results_path.open("x", encoding="utf-8", newline="\n") as results_handle:
+        stop = False
         for task_key, task_a, task_b in pairs:
             judge_prompt = build_judge_prompt(prompts[task_key])
             for trial_index in range(trials):
@@ -446,7 +459,17 @@ def run() -> int:
                         timeout_seconds=timeout,
                         environment=_judge_environment(runtime_tmp),
                     )
-                    result = judge.judge(request)
+                    try:
+                        result = judge.judge(request)
+                    except KeyboardInterrupt:
+                        row = _interrupted_row(task_key, trial_index, prepared.swapped, preflight)
+                        results_handle.write(json.dumps(row, sort_keys=True) + "\n")
+                        results_handle.flush()
+                        _persist_executor_logs(out_dir, task_key, trial_index, prepared.executor_dir, row)
+                        interrupted = True
+                        stop = True
+                        break
+
                     normalized = normalize_verdict(result.verdict, prepared.swapped) if result.verdict else None
                     if normalized is None:
                         invalid_trials += 1
@@ -472,8 +495,15 @@ def run() -> int:
                     results_handle.flush()
                     _persist_executor_logs(out_dir, task_key, trial_index, prepared.executor_dir, row)
 
-    # Provenance includes candidate paths/labels, so write it only after every
-    # judge model call is complete and no anonymous workspace remains.
+                    if result.exit_code is None or result.exit_code != 0:
+                        systemic_failure = (
+                            f"judge executor failed for {task_key} trial {trial_index}: exit_code={result.exit_code}"
+                        )
+                        stop = True
+                        break
+            if stop:
+                break
+
     if os.getenv("GDPVAL_WRITE_METADATA", "1") != "0":
         _write_run_metadata(out_dir, preflight)
 
@@ -508,6 +538,8 @@ def run() -> int:
         "tasks": len(pairs),
         "trials_per_task": trials,
         "invalid_trials": invalid_trials,
+        "interrupted": interrupted,
+        "systemic_failure": systemic_failure,
         "result": aggregate(normalized_verdicts),
         "candidate_a": candidate_summary(os.getenv("GDPVAL_LABEL_A"), generator_a),
         "candidate_b": candidate_summary(os.getenv("GDPVAL_LABEL_B"), generator_b),
@@ -516,6 +548,12 @@ def run() -> int:
         json.dumps(summary, indent=2, sort_keys=True) + "\n",
         encoding="utf-8",
     )
+    if interrupted:
+        print("gdpval: local judge interrupted; partial logs/results preserved", file=sys.stderr)
+        return 130
+    if systemic_failure:
+        print(f"gdpval: {systemic_failure}; stopping further judge calls", file=sys.stderr)
+        return 1
     if invalid_trials:
         print(f"gdpval: {invalid_trials} local judge trial(s) were invalid", file=sys.stderr)
         return 1
