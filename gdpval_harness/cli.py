@@ -12,6 +12,7 @@ from pathlib import Path
 from gdpval_harness.benchmarks.registry import create_benchmark, get_benchmark_descriptor, list_benchmarks
 from gdpval_harness.evaluators.registry import create_evaluator, get_evaluator_descriptor
 from gdpval_harness.executors.registry import create_executor, get_executor_descriptor, list_executors
+from gdpval_harness.interventions.registry import create_intervention
 from gdpval_harness.runner import run_benchmark
 
 
@@ -35,6 +36,17 @@ def _parser() -> argparse.ArgumentParser:
     run_parser.add_argument("--executor-timeout", type=float, default=12600.0)
     run_parser.add_argument("--network", action="store_true", help="Explicitly enable policy-executor network access")
     run_parser.add_argument("--claude-max-turns", type=int, default=250)
+    run_parser.add_argument(
+        "--intervention",
+        choices=("none", "prompt-overlay", "files"),
+        default="none",
+        help="Apply a registered intervention before execution (default: none)",
+    )
+    run_parser.add_argument(
+        "--intervention-source",
+        type=Path,
+        help="Source file/directory for the selected non-none intervention",
+    )
     return parser
 
 
@@ -78,7 +90,12 @@ def _run(args: argparse.Namespace) -> int:
         raise ValueError("--executor-timeout must be positive")
     if args.claude_max_turns <= 0:
         raise ValueError("--claude-max-turns must be positive")
+    if args.intervention == "none" and args.intervention_source is not None:
+        raise ValueError("--intervention-source requires --intervention prompt-overlay or files")
+    if args.intervention != "none" and args.intervention_source is None:
+        raise ValueError(f"--intervention-source is required for --intervention {args.intervention}")
 
+    intervention = create_intervention(args.intervention, source=args.intervention_source)
     benchmark = create_benchmark(args.benchmark)
     evaluator = create_evaluator(args.benchmark)
     executor = create_executor(
@@ -95,6 +112,7 @@ def _run(args: argparse.Namespace) -> int:
         limit=args.limit,
         model=args.model,
         timeout_seconds=args.executor_timeout,
+        intervention=intervention,
     )
     print(
         json.dumps(

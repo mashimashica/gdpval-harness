@@ -9,6 +9,7 @@ import os
 import shutil
 import subprocess
 import sys
+import uuid
 from pathlib import Path
 from typing import Iterable
 
@@ -18,6 +19,13 @@ from gdpval_harness.executors.base import ExecutionRequest, ExecutionResult, Exe
 from gdpval_harness.executors.claude_code import ClaudeCodeExecutor
 from gdpval_harness.executors.codex import CodexExecutor
 from gdpval_harness.executors.cursor import CursorExecutor
+from gdpval_harness.interventions import (
+    Intervention,
+    InterventionApplication,
+    NoneIntervention,
+    PromptOverlayIntervention,
+    apply_prompt_overlay,
+)
 from gdpval_harness.layout import TaskLayout, task_layout
 
 
@@ -28,6 +36,7 @@ BENCHMARK_JSONL = Path(
 PREPARE_SCRIPT = Path(os.getenv("GDPVAL_PREPARE_SCRIPT", ROOT / "benchmarks" / "gdpval" / "prepare.py"))
 _TERMINAL_SUCCESS = {ExecutionStatus.COMPLETED, ExecutionStatus.NO_DELIVERABLE}
 _MAX_CONDITION_FILE_BYTES = 1024 * 1024
+_CONDITION_ENVIRONMENT_KEYS = frozenset({"GDPVAL_CONDITION", "GDPVAL_CONDITION_FILE", "GDPVAL_CONDITION_APPLIED"})
 
 
 def _benchmark() -> GDPvalBenchmark:
@@ -58,6 +67,23 @@ def _executor(name: str):
     if name == "cursor":
         return CursorExecutor(network_enabled=network_enabled)
     raise ValueError(f"local executor {name!r} is not implemented")
+
+
+def _build_intervention() -> Intervention:
+    raw = os.getenv("GDPVAL_CONDITION_FILE")
+    if not raw:
+        return NoneIntervention()
+    # Keep the user-supplied path intact for the intervention's symlink and
+    # regular-file checks.  The legacy condition provenance helpers continue
+    # to use the resolved path for their existing hash/resume behavior.
+    return PromptOverlayIntervention(Path(raw).expanduser())
+
+
+def _executor_environment() -> dict[str, str]:
+    environment = os.environ.copy()
+    for name in _CONDITION_ENVIRONMENT_KEYS:
+        environment.pop(name, None)
+    return environment
 
 
 def _condition_file() -> Path | None:
@@ -174,18 +200,7 @@ def build_task_prompt(
     network_policy: str,
     condition_instructions: str | None = None,
 ) -> str:
-    condition_section = ""
-    if condition_instructions:
-        condition_section = f"""
-Additional experiment-condition instructions:
-<condition_instructions>
-{condition_instructions}
-</condition_instructions>
-
-Apply these instructions while completing the task. They are an external experimental intervention,
-not part of GDPval itself.
-"""
-    return f"""You are completing a GDPval professional-work task in an isolated local workspace.
+    prompt = f"""You are completing a GDPval professional-work task in an isolated local workspace.
 
 Work only on this task. Do not create, hand off, or continue the task in any cloud/background agent.
 Use only tools actually available in this local runtime; do not assume packages or system tools are installed.
@@ -200,10 +215,13 @@ Final deliverables contract:
 - Keep scratch files, logs, caches, helper scripts, and executor metadata out of ./deliverables/.
 - Do not modify the reference_files directory.
 - Network policy for model-generated tools: {network_policy}.
-{condition_section}
 Task:
 {task.prompt}
 """
+    prompt_task = TaskSpec(task_id=task.task_id, prompt=prompt)
+    if condition_instructions:
+        prompt_task = apply_prompt_overlay(prompt_task, condition_instructions)
+    return prompt_task.prompt
 
 
 def _prepare_layout(out_dir: Path, task: TaskSpec) -> TaskLayout:
@@ -262,7 +280,29 @@ def _copy_final_deliverables(layout: TaskLayout, result: ExecutionResult) -> lis
     return copied
 
 
-def _write_executor_metadata(layout: TaskLayout, result: ExecutionResult, files: Iterable[str]) -> None:
+def _application_evidence(application: InterventionApplication) -> dict[str, object]:
+    return {
+        "application_run_id": application.application_run_id,
+        "bundle_sha256": application.bundle_sha256,
+        "manifest_sha256": application.manifest_sha256,
+        "application": {
+            "method": application.application.method,
+            "target": application.application.target,
+        },
+        "materialized_files": [
+            {"path": item.path, "size": item.size, "sha256": item.sha256}
+            for item in application.materialized_files
+        ],
+    }
+
+
+def _write_executor_metadata(
+    layout: TaskLayout,
+    result: ExecutionResult,
+    files: Iterable[str],
+    *,
+    intervention_application: InterventionApplication | None = None,
+) -> None:
     payload = {
         "task_id": result.task_id,
         "workspace": str(result.workspace),
@@ -278,6 +318,8 @@ def _write_executor_metadata(layout: TaskLayout, result: ExecutionResult, files:
         "submitted_files": list(files),
         "metadata": dict(result.metadata),
     }
+    if intervention_application is not None:
+        payload["intervention_application"] = _application_evidence(intervention_application)
     (layout.executor_dir / "metadata.json").write_text(
         json.dumps(payload, indent=2, sort_keys=True) + "\n",
         encoding="utf-8",
@@ -321,7 +363,55 @@ def _parse_timeout() -> float:
     return value
 
 
-def preflight(executor_name: str, out_dir: Path, *, for_run: bool) -> tuple[bool, dict[str, object]]:
+def _intervention_payload(intervention: Intervention) -> tuple[bool, dict[str, object]]:
+    try:
+        result = intervention.preflight()
+    except Exception as exc:
+        return False, {
+            "name": getattr(intervention, "name", type(intervention).__name__),
+            "type": str(getattr(intervention, "intervention_type", "unknown")),
+            "ok": False,
+            "details": [f"intervention preflight failed: {exc}"],
+        }
+    return result.ok, {
+        "name": result.name,
+        "type": result.intervention_type.value,
+        "ok": result.ok,
+        "details": list(result.details),
+    }
+
+
+def preflight(
+    executor_name: str,
+    out_dir: Path,
+    *,
+    for_run: bool,
+    intervention: Intervention | None = None,
+) -> tuple[bool, dict[str, object]]:
+    if intervention is None:
+        try:
+            intervention = _build_intervention()
+        except ValueError as exc:
+            return False, {
+                "executor": executor_name,
+                "ok": False,
+                "version": None,
+                "auth_mode": None,
+                "details": [str(exc)],
+                "intervention": None,
+            }
+
+    intervention_ok, intervention_details = _intervention_payload(intervention)
+    if not intervention_ok:
+        return False, {
+            "executor": executor_name,
+            "ok": False,
+            "version": None,
+            "auth_mode": None,
+            "details": list(intervention_details["details"]),
+            "intervention": intervention_details,
+        }
+
     try:
         executor = _executor(executor_name)
     except ValueError as exc:
@@ -331,6 +421,7 @@ def preflight(executor_name: str, out_dir: Path, *, for_run: bool) -> tuple[bool
             "version": None,
             "auth_mode": None,
             "details": [str(exc)],
+            "intervention": intervention_details,
         }
 
     result = executor.preflight()
@@ -361,8 +452,6 @@ def preflight(executor_name: str, out_dir: Path, *, for_run: bool) -> tuple[bool
     if for_run:
         try:
             _parse_limit()
-            if os.getenv("GDPVAL_CONDITION_FILE"):
-                _condition_instructions()
         except ValueError as exc:
             details.append(str(exc))
             ok = False
@@ -391,6 +480,7 @@ def preflight(executor_name: str, out_dir: Path, *, for_run: bool) -> tuple[bool
         "version": result.version,
         "auth_mode": result.auth_mode,
         "details": details,
+        "intervention": intervention_details,
     }
 
 
@@ -413,14 +503,14 @@ def _write_run_metadata(out_dir: Path, preflight_payload: dict[str, object]) -> 
 def run() -> int:
     executor_name = os.getenv("GDPVAL_EXECUTOR", "codex")
     out_dir = Path(os.getenv("OUT", "./results/gdpval")).resolve()
-    ok, preflight_payload = preflight(executor_name, out_dir, for_run=True)
+    intervention = _build_intervention()
+    ok, preflight_payload = preflight(executor_name, out_dir, for_run=True, intervention=intervention)
     for detail in preflight_payload["details"]:
         print(f"gdpval[{executor_name}]: {detail}", file=sys.stderr)
     if not ok:
         print(f"gdpval[{executor_name}]: preflight failed", file=sys.stderr)
         return 2
 
-    condition_instructions = _condition_instructions()
     if os.getenv("GDPVAL_WRITE_METADATA", "1") != "0":
         _write_run_metadata(out_dir, preflight_payload)
 
@@ -451,17 +541,81 @@ def run() -> int:
                     task,
                     layout.workspace,
                     network_policy=network_policy,
-                    condition_instructions=condition_instructions,
                 ),
             )
+        except KeyboardInterrupt:
+            interrupted = {
+                "task_id": task.task_id,
+                "execution_status": ExecutionStatus.INTERRUPTED.value,
+                "executor": executor_name,
+            }
+            (layout.executor_dir / "metadata.json").write_text(
+                json.dumps(interrupted, indent=2, sort_keys=True) + "\n",
+                encoding="utf-8",
+            )
+            return 130
+        except Exception as exc:
+            failures += 1
+            error = {
+                "task_id": task.task_id,
+                "execution_status": ExecutionStatus.FAILED.value,
+                "executor": executor_name,
+                "harness_error": str(exc),
+            }
+            (layout.executor_dir / "metadata.json").write_text(
+                json.dumps(error, indent=2, sort_keys=True) + "\n",
+                encoding="utf-8",
+            )
+            print(f"gdpval[{executor_name}]: task {task.task_id}: harness failure: {exc}", file=sys.stderr)
+            continue
+
+        try:
+            intervention.validate_task(prompt_task)
+            application = intervention.apply(
+                prompt_task,
+                layout.workspace,
+                application_run_id=uuid.uuid4().hex,
+            )
+        except KeyboardInterrupt:
+            interrupted = {
+                "task_id": task.task_id,
+                "execution_status": ExecutionStatus.INTERRUPTED.value,
+                "executor": executor_name,
+            }
+            (layout.executor_dir / "metadata.json").write_text(
+                json.dumps(interrupted, indent=2, sort_keys=True) + "\n",
+                encoding="utf-8",
+            )
+            return 130
+        except Exception as exc:
+            failures += 1
+            error = {
+                "task_id": task.task_id,
+                "execution_status": ExecutionStatus.FAILED.value,
+                "executor": executor_name,
+                "harness_error": "intervention application failed before executor",
+                "intervention_error_type": type(exc).__name__,
+            }
+            (layout.executor_dir / "metadata.json").write_text(
+                json.dumps(error, indent=2, sort_keys=True) + "\n",
+                encoding="utf-8",
+            )
+            print(
+                f"gdpval[{executor_name}]: task {task.task_id}: intervention failed before executor "
+                f"({type(exc).__name__})",
+                file=sys.stderr,
+            )
+            continue
+
+        try:
             request = ExecutionRequest(
-                task=prompt_task,
+                task=application.task,
                 workspace=layout.workspace,
                 deliverables_dir=layout.workspace_deliverables,
                 executor_dir=layout.executor_dir,
                 model=os.getenv("GDPVAL_MODEL"),
                 timeout_seconds=timeout,
-                environment=os.environ.copy(),
+                environment=_executor_environment(),
             )
             result = executor.execute(request)
             copied = _copy_final_deliverables(layout, result)
@@ -491,7 +645,12 @@ def run() -> int:
             print(f"gdpval[{executor_name}]: task {task.task_id}: harness failure: {exc}", file=sys.stderr)
             continue
 
-        _write_executor_metadata(layout, result, copied)
+        _write_executor_metadata(
+            layout,
+            result,
+            copied,
+            intervention_application=application,
+        )
         print(
             f"gdpval[{executor_name}]: task {task.task_id}: {result.status.value} ({len(copied)} deliverable(s))",
             file=sys.stderr,

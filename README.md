@@ -41,6 +41,16 @@ AIME26 reports `accuracy` after a preflight requiring `math-verify==0.8.0`. BigC
 
 Programmatic callers can inject an explicit evaluator into the generic runner when its `validate_plan` accepts the benchmark's candidate layout. The pairwise adapter is opt-in, requires an injected `JudgeExecutor`, and evaluates exactly two candidates; it is not the GDPval CLI default.
 
+The generic runner composes the registered `Benchmark × Executor × Intervention × Evaluator` axes. The default intervention is identity, and source-backed interventions are selected explicitly:
+
+```bash
+./eval run aime26 --executor codex --limit 1 --intervention none
+./eval run aime26 --executor codex --limit 1 --intervention prompt-overlay --intervention-source ./overlay.txt
+./eval run bigcodebench --executor codex --limit 1 --intervention files --intervention-source ./reviewed-files
+```
+
+`TaskSpec` contains only the benchmark task id and canonical prompt. Intervention application changes the executor task or workspace and records reviewed hashes, logical materialized files, and static application evidence separately. External source paths and outer condition labels are excluded from the derived `TaskSpec`, materialized workspace, executor argv, and child environment. Intervention content crosses those boundaries only through its explicitly selected application method (prompt overlay or workspace files); hashes, revisions, and application evidence are persisted outside `TaskSpec`. Generic runs do not resume and refuse to overwrite an existing output directory. Registered benchmark, intervention, evaluator, and executor combinations still enforce their own preflight and plan compatibility; the axes do not imply arbitrary cross-product support.
+
 ## Subscription/account-backed local executors
 
 List supported runtimes:

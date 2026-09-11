@@ -25,10 +25,19 @@ from gdpval_harness.evaluators.base import (
     EvaluatorPreflightResult,
 )
 from gdpval_harness.executors.base import ExecutionRequest, ExecutionResult, ExecutionStatus, Executor
+from gdpval_harness.interventions.base import (
+    Intervention,
+    InterventionApplication,
+    InterventionPreflightResult,
+)
+from gdpval_harness.interventions.none import NoneIntervention
 from gdpval_harness.layout import task_layout
 
 
 _SUCCESS_STATUSES = {ExecutionStatus.COMPLETED, ExecutionStatus.NO_DELIVERABLE}
+_LEGACY_CONDITION_ENVIRONMENT_KEYS = frozenset(
+    {"GDPVAL_CONDITION", "GDPVAL_CONDITION_FILE", "GDPVAL_CONDITION_APPLIED"}
+)
 
 
 def _now() -> str:
@@ -71,6 +80,16 @@ def _append_jsonl(handle, payload: Mapping[str, object]) -> None:
     handle.write(json.dumps(payload, sort_keys=True) + "\n")
     handle.flush()
     os.fsync(handle.fileno())
+
+
+def _executor_environment() -> dict[str, str]:
+    """Pass the generic executor a clean environment without legacy labels."""
+
+    return {
+        key: value
+        for key, value in os.environ.items()
+        if key not in _LEGACY_CONDITION_ENVIRONMENT_KEYS
+    }
 
 
 def _value(value: object) -> object:
@@ -218,6 +237,108 @@ def _evaluator_metadata(evaluator: Evaluator, preflight: EvaluatorPreflightResul
     return payload
 
 
+def _intervention_metadata(
+    intervention: Intervention,
+    preflight: InterventionPreflightResult,
+) -> dict[str, object]:
+    """Persist only the reviewed intervention descriptor and hashes."""
+
+    bundle = preflight.bundle
+    manifest = bundle.manifest if bundle is not None else None
+    application = manifest.application if manifest is not None else None
+    intervention_id = (
+        manifest.intervention_id
+        if manifest is not None
+        else getattr(intervention, "intervention_id", None) or preflight.name
+    )
+    intervention_type = _value(getattr(preflight, "intervention_type", None))
+    source_revision = manifest.source_revision if manifest is not None else None
+    revision_status = manifest.revision_status if manifest is not None else "unavailable"
+    files = (
+        [
+            {"path": item.path, "size": item.size, "sha256": item.sha256}
+            for item in manifest.files
+        ]
+        if manifest is not None
+        else []
+    )
+    return {
+        "id": intervention_id,
+        "type": intervention_type,
+        "revision": source_revision,
+        "source_revision": source_revision,
+        "revision_status": revision_status,
+        "status": "ready" if preflight.ok else "failed",
+        "bundle_sha256": manifest.bundle_sha256 if manifest is not None else None,
+        "manifest_sha256": manifest.manifest_sha256 if manifest is not None else None,
+        "files": files,
+        "application": (
+            {"method": application.method, "target": application.target}
+            if application is not None
+            else {"method": None, "target": None}
+        ),
+    }
+
+
+def _intervention_application_payload(
+    application: InterventionApplication,
+    descriptor: Mapping[str, object],
+) -> dict[str, object]:
+    """Convert application evidence into a safe durable JSON payload."""
+
+    mapping = application.application
+    files = [
+        {"path": item.path, "size": item.size, "sha256": item.sha256}
+        for item in application.materialized_files
+    ]
+    payload = {
+        "id": descriptor.get("id"),
+        "type": descriptor.get("type"),
+        "revision": descriptor.get("revision"),
+        "source_revision": descriptor.get("source_revision"),
+        "revision_status": descriptor.get("revision_status"),
+        "status": "applied",
+        "application_run_id": application.application_run_id,
+        "bundle_sha256": application.bundle_sha256,
+        "manifest_sha256": application.manifest_sha256,
+        "application": {"method": mapping.method, "target": mapping.target},
+        "materialized_files": files,
+    }
+    return payload
+
+
+def _intervention_error_payload(
+    exc: BaseException,
+    *,
+    descriptor: Mapping[str, object],
+    application_run_id: str,
+    phase: str,
+    interrupted: bool = False,
+) -> dict[str, object]:
+    """Return safe intervention failure evidence without arbitrary exception text."""
+
+    return {
+        "id": descriptor.get("id"),
+        "type": descriptor.get("type"),
+        "revision": descriptor.get("revision"),
+        "source_revision": descriptor.get("source_revision"),
+        "revision_status": descriptor.get("revision_status"),
+        "status": "interrupted" if interrupted else "failed",
+        "application_run_id": application_run_id,
+        "bundle_sha256": descriptor.get("bundle_sha256"),
+        "manifest_sha256": descriptor.get("manifest_sha256"),
+        "application": descriptor.get("application"),
+        "materialized_files": [],
+        "error_type": type(exc).__name__,
+        "error_message": (
+            "intervention application interrupted before executor"
+            if interrupted
+            else "intervention application failed before executor"
+        ),
+        "error_details": {"phase": phase, "exception_type": type(exc).__name__},
+    }
+
+
 @dataclass(frozen=True)
 class RunSummary:
     benchmark: str
@@ -238,9 +359,12 @@ def run_benchmark(
     limit: int,
     model: str | None = None,
     timeout_seconds: float = 12600.0,
+    intervention: Intervention | None = None,
 ) -> RunSummary:
     """Run benchmark tasks using the injected evaluator and executor."""
 
+    if intervention is None:
+        intervention = NoneIntervention()
     if limit <= 0:
         raise ValueError("--limit must be positive")
     if timeout_seconds <= 0:
@@ -253,6 +377,10 @@ def run_benchmark(
     evaluator_preflight = evaluator.preflight(run_dir=out_dir)
     if not evaluator_preflight.ok:
         raise _preflight_failure(getattr(evaluator, "name", "evaluator"), evaluator_preflight.details)
+
+    intervention_preflight = intervention.preflight()
+    if not intervention_preflight.ok:
+        raise _preflight_failure(getattr(intervention, "name", "intervention"), intervention_preflight.details)
 
     executor_preflight = executor.preflight()
     if not executor_preflight.ok:
@@ -275,6 +403,7 @@ def run_benchmark(
             artifact_dir=layout.judge_deliverables,
         )
         evaluator.validate_plan(plan)
+        intervention.validate_task(task.execution)
         plans.append(plan)
     out_dir.mkdir(parents=True, exist_ok=False)
     started_at = _now()
@@ -282,6 +411,7 @@ def run_benchmark(
     results_path = out_dir / "results.jsonl"
     network_policy = "enabled" if bool(getattr(executor, "network_enabled", False)) else "disabled"
     evaluator_info = _evaluator_metadata(evaluator, evaluator_preflight)
+    intervention_info = _intervention_metadata(intervention, intervention_preflight)
     base_metadata: dict[str, object] = {
         "schema_version": 2,
         "benchmark": benchmark.name,
@@ -291,6 +421,10 @@ def run_benchmark(
         "evaluator_version": evaluator_info["version"],
         "evaluator_revision": evaluator_info["revision"],
         "evaluator": evaluator_info,
+        "intervention_id": intervention_info["id"],
+        "intervention_type": intervention_info["type"],
+        "intervention_revision": intervention_info["revision"],
+        "intervention": intervention_info,
         "executor": executor.name,
         "executor_version": executor_preflight.version,
         "auth_mode": executor_preflight.auth_mode,
@@ -327,14 +461,85 @@ def run_benchmark(
                 with canonical_path.open("rb") as canonical_handle:
                     canonical_handle.flush()
                     os.fsync(canonical_handle.fileno())
+                application_run_id = secrets.token_urlsafe(24)
+                try:
+                    application = intervention.apply(
+                        execution_task,
+                        layout.workspace,
+                        application_run_id=application_run_id,
+                    )
+                    if application.application_run_id != application_run_id:
+                        raise ValueError("intervention returned a mismatched application_run_id")
+                    if application.task.task_id != task.execution.task_id:
+                        raise ValueError("intervention returned a mismatched task_id")
+                    if application.bundle_sha256 != intervention_info["bundle_sha256"]:
+                        raise ValueError("intervention returned a mismatched bundle_sha256")
+                    if application.manifest_sha256 != intervention_info["manifest_sha256"]:
+                        raise ValueError("intervention returned a mismatched manifest_sha256")
+                    application_mapping = {
+                        "method": application.application.method,
+                        "target": application.application.target,
+                    }
+                    if application_mapping != intervention_info["application"]:
+                        raise ValueError("intervention returned a mismatched application mapping")
+                    intervention_payload = _intervention_application_payload(application, intervention_info)
+                except KeyboardInterrupt as exc:
+                    intervention_payload = _intervention_error_payload(
+                        exc,
+                        descriptor=intervention_info,
+                        application_run_id=application_run_id,
+                        phase="intervention_apply",
+                        interrupted=True,
+                    )
+                    row = {
+                        "task_id": task.execution.task_id,
+                        "materialized": materialized,
+                        "intervention": intervention_payload,
+                        "execution": None,
+                        "evaluation": None,
+                    }
+                    _write_json(layout.executor_dir.parent / "result.json", row)
+                    _append_jsonl(results_handle, row)
+                    rows.append(row)
+                    base_metadata["failure"] = {
+                        "phase": "intervention_apply",
+                        "exception_type": type(exc).__name__,
+                    }
+                    run_status = "interrupted"
+                    _write_run_metadata(metadata_path, base_metadata, status=run_status, rows=rows)
+                    raise
+                except Exception as exc:
+                    intervention_payload = _intervention_error_payload(
+                        exc,
+                        descriptor=intervention_info,
+                        application_run_id=application_run_id,
+                        phase="intervention_apply",
+                    )
+                    row = {
+                        "task_id": task.execution.task_id,
+                        "materialized": materialized,
+                        "intervention": intervention_payload,
+                        "execution": None,
+                        "evaluation": None,
+                    }
+                    _write_json(layout.executor_dir.parent / "result.json", row)
+                    _append_jsonl(results_handle, row)
+                    rows.append(row)
+                    base_metadata["failure"] = {
+                        "phase": "intervention_apply",
+                        "exception_type": type(exc).__name__,
+                    }
+                    run_status = "failed"
+                    _write_run_metadata(metadata_path, base_metadata, status=run_status, rows=rows)
+                    raise
                 request = ExecutionRequest(
-                    task=execution_task,
+                    task=application.task,
                     workspace=layout.workspace,
                     deliverables_dir=layout.workspace_deliverables,
                     executor_dir=layout.executor_dir,
                     model=model,
                     timeout_seconds=timeout_seconds,
-                    environment=os.environ.copy(),
+                    environment=_executor_environment(),
                 )
                 result = executor.execute(request)
 
@@ -342,6 +547,7 @@ def run_benchmark(
                     row = {
                         "task_id": task.execution.task_id,
                         "materialized": materialized,
+                        "intervention": intervention_payload,
                         "execution": _execution_payload(result),
                         "evaluation": evaluation_payload,
                     }

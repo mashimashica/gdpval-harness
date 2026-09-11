@@ -14,6 +14,10 @@ grep -q 'benchmarks' <<<"$help"
 grep -q 'executors' <<<"$help"
 grep -q 'run' <<<"$help"
 
+run_help="$(./eval run --help)"
+grep -q -- '--intervention' <<<"$run_help"
+grep -q -- '--intervention-source' <<<"$run_help"
+
 benchmarks="$(./eval benchmarks)"
 grep -q '^aime26' <<<"$benchmarks"
 grep -q '^bigcodebench' <<<"$benchmarks"
@@ -41,6 +45,15 @@ if ./eval run bigcodebench --executor stirrup --limit 1 >/dev/null 2>&1; then
 fi
 if ./eval run aime26 --executor codex --limit 0 >/dev/null 2>&1; then
   echo "generic eval unexpectedly accepted a non-positive limit" >&2
+  exit 1
+fi
+if ./eval run aime26 --executor codex --limit 1 --intervention prompt-overlay >/dev/null 2>&1; then
+  echo "generic eval unexpectedly accepted a missing intervention source" >&2
+  exit 1
+fi
+if ./eval run aime26 --executor codex --limit 1 \
+  --intervention none --intervention-source /tmp/unused >/dev/null 2>&1; then
+  echo "generic eval unexpectedly accepted a source for the none intervention" >&2
   exit 1
 fi
 

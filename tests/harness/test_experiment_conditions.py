@@ -11,16 +11,80 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from gdpval_harness.executors.base import ExecutionRequest, TaskSpec
+import gdpval_harness.local_runner as local_runner
+from gdpval_harness.benchmarks.base import BenchmarkTask
+from gdpval_harness.executors.base import (
+    ExecutionRequest,
+    ExecutionResult,
+    ExecutionStatus,
+    PreflightResult,
+    TaskSpec,
+)
+from gdpval_harness.executors.claude_code import ClaudeCodeExecutor
 from gdpval_harness.executors.codex import CodexExecutor
+from gdpval_harness.executors.cursor import CursorExecutor
+from gdpval_harness.interventions import PromptOverlayIntervention
 from gdpval_harness.judges.base import JudgeRequest
 from gdpval_harness.judges.codex import CodexJudgeExecutor
 from gdpval_harness.local_judge_runner import _candidate_task_prompt
 from gdpval_harness.local_runner import (
+    _application_evidence,
     _condition_instructions,
+    _executor_environment,
     _validate_resume_condition,
     build_task_prompt,
 )
+
+
+class _FakeLocalBenchmark:
+    def __init__(self, prompt: str = "Base GDPval task") -> None:
+        self.prompt = prompt
+        self.prepared = 0
+
+    def is_prepared(self) -> bool:
+        return True
+
+    def prepare(self) -> None:
+        self.prepared += 1
+
+    def load_tasks(self, limit: int) -> list[BenchmarkTask]:
+        if limit != 1:
+            raise AssertionError(f"expected one fake task, got {limit}")
+        return [BenchmarkTask(execution=TaskSpec("task", self.prompt))]
+
+    def materialize(self, task: BenchmarkTask, workspace: Path) -> list[str]:
+        del task, workspace
+        return []
+
+
+class _CapturingLocalExecutor:
+    name = "fake-local"
+    invocation_mode = "fake"
+    tool_permission_mode = "fake"
+
+    def __init__(self) -> None:
+        self.preflight_calls = 0
+        self.requests: list[ExecutionRequest] = []
+
+    def preflight(self) -> PreflightResult:
+        self.preflight_calls += 1
+        return PreflightResult(executor=self.name, ok=True, version="fake-1", auth_mode="fake")
+
+    def execute(self, request: ExecutionRequest) -> ExecutionResult:
+        self.requests.append(request)
+        return ExecutionResult(
+            task_id=request.task.task_id,
+            executor=self.name,
+            executor_version="fake-1",
+            invocation_mode=self.invocation_mode,
+            auth_mode="fake",
+            workspace=request.workspace,
+            deliverables_dir=request.deliverables_dir,
+            status=ExecutionStatus.NO_DELIVERABLE,
+            started_at="started",
+            finished_at="finished",
+            exit_code=0,
+        )
 
 
 class ExperimentConditionTests(unittest.TestCase):
@@ -66,8 +130,191 @@ class ExperimentConditionTests(unittest.TestCase):
                 condition_instructions=instructions,
             )
             self.assertIn("Use the supplied work-design method.", prompt)
+            self.assertEqual(prompt.count("[BEGIN INTERVENTION PROMPT OVERLAY]"), 1)
             self.assertNotIn("secret-label", prompt)
             self.assertEqual(prompt.rsplit("\nTask:\n", 1)[1], "Base GDPval task\n")
+
+    def test_condition_label_and_source_stay_out_of_application_and_executor_inputs(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source = root / "condition-source-sentinel.md"
+            source.write_text("Use the supplied work-design method.\n", encoding="utf-8")
+            workspace = root / "workspace"
+            workspace.mkdir()
+            label = "condition-label-sentinel"
+            with patch.dict(
+                os.environ,
+                {
+                    "GDPVAL_CONDITION": label,
+                    "GDPVAL_CONDITION_FILE": str(source),
+                    "GDPVAL_CONDITION_APPLIED": "true",
+                },
+                clear=True,
+            ):
+                environment = _executor_environment()
+
+            intervention = PromptOverlayIntervention(source)
+            self.assertTrue(intervention.preflight().ok)
+            wrapped = TaskSpec(
+                "task",
+                build_task_prompt(
+                    TaskSpec("task", "Base GDPval task"),
+                    workspace,
+                    network_policy="disabled",
+                ),
+            )
+            application = intervention.apply(wrapped, workspace, application_run_id="opaque-application-run")
+            application_payload = json.dumps(_application_evidence(application), sort_keys=True)
+
+            self.assertIn("Use the supplied work-design method.", application.task.prompt)
+            self.assertEqual(application.task.prompt.count("[BEGIN INTERVENTION PROMPT OVERLAY]"), 1)
+            self.assertNotIn(label, application.task.prompt)
+            self.assertNotIn(str(source), application.task.prompt)
+            self.assertNotIn(label, application_payload)
+            self.assertNotIn(str(source), application_payload)
+            self.assertNotIn(label, environment)
+            self.assertNotIn(str(source), environment)
+            self.assertNotIn("GDPVAL_CONDITION", environment)
+            self.assertNotIn("GDPVAL_CONDITION_FILE", environment)
+            self.assertNotIn("GDPVAL_CONDITION_APPLIED", environment)
+
+            request = ExecutionRequest(
+                task=application.task,
+                workspace=workspace,
+                deliverables_dir=workspace / "deliverables",
+                executor_dir=root / "executor",
+                environment=environment,
+            )
+            for executor in (
+                CodexExecutor(command="codex"),
+                ClaudeCodeExecutor(command="claude"),
+                CursorExecutor(command="agent"),
+            ):
+                argv = " ".join(executor.build_command(request))
+                self.assertNotIn(label, argv)
+                self.assertNotIn(str(source), argv)
+
+    def test_run_applies_overlay_once_and_keeps_canonical_prompt_and_metadata_outer(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source = root / "condition-source-sentinel.md"
+            source.write_text("Use the supplied work-design method.\n", encoding="utf-8")
+            out = root / "run"
+            label = "condition-label-sentinel"
+            benchmark = _FakeLocalBenchmark()
+            executor = _CapturingLocalExecutor()
+            intervention = PromptOverlayIntervention(source)
+            with patch.dict(
+                os.environ,
+                {
+                    "GDPVAL_EXECUTOR": "fake-local",
+                    "GDPVAL_CONDITION": label,
+                    "GDPVAL_CONDITION_FILE": str(source),
+                    "GDPVAL_CONDITION_APPLIED": "true",
+                    "GDPVAL_WRITE_METADATA": "0",
+                    "LIMIT": "1",
+                    "OUT": str(out),
+                },
+                clear=True,
+            ), patch.object(local_runner, "_build_intervention", return_value=intervention), patch.object(
+                local_runner, "_benchmark", return_value=benchmark
+            ), patch.object(local_runner, "_executor", return_value=executor), patch.object(
+                intervention, "apply", wraps=intervention.apply
+            ) as apply:
+                status = local_runner.run()
+
+            self.assertEqual(status, 0)
+            self.assertEqual(executor.preflight_calls, 1)
+            self.assertEqual(len(executor.requests), 1)
+            self.assertEqual(apply.call_count, 1)
+            request = executor.requests[0]
+            self.assertEqual(request.task.task_id, "task")
+            self.assertEqual(request.task.prompt.count("[BEGIN INTERVENTION PROMPT OVERLAY]"), 1)
+            self.assertEqual(request.task.prompt.count("Use the supplied work-design method."), 1)
+            self.assertNotIn(label, request.task.prompt)
+            self.assertNotIn(str(source), request.task.prompt)
+            self.assertNotIn(label, request.environment)
+            self.assertNotIn(str(source), request.environment)
+            self.assertNotIn("GDPVAL_CONDITION", request.environment)
+            self.assertNotIn("GDPVAL_CONDITION_FILE", request.environment)
+            self.assertNotIn("GDPVAL_CONDITION_APPLIED", request.environment)
+
+            canonical = (out / "tasks" / "task" / "executor" / "task-prompt.txt").read_text(encoding="utf-8")
+            self.assertEqual(canonical, "Base GDPval task")
+            metadata = json.loads((out / "tasks" / "task" / "executor" / "metadata.json").read_text())
+            evidence = json.dumps(metadata["intervention_application"], sort_keys=True)
+            self.assertNotIn(label, evidence)
+            self.assertNotIn(str(source), evidence)
+            self.assertTrue(metadata["intervention_application"]["application_run_id"])
+
+            for path in (out / "tasks" / "task").rglob("*"):
+                if path.is_file():
+                    contents = path.read_text(encoding="utf-8")
+                    self.assertNotIn(label, contents)
+                    self.assertNotIn(str(source), contents)
+
+    def test_invalid_condition_fails_before_executor_preflight(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source = root / "invalid-condition.md"
+            source.write_bytes(b"\xff")
+            out = root / "run"
+            executor = _CapturingLocalExecutor()
+            with patch.dict(
+                os.environ,
+                {
+                    "GDPVAL_EXECUTOR": "fake-local",
+                    "GDPVAL_CONDITION_FILE": str(source),
+                    "GDPVAL_WRITE_METADATA": "0",
+                    "LIMIT": "1",
+                    "OUT": str(out),
+                },
+                clear=True,
+            ), patch.object(local_runner, "_executor", return_value=executor):
+                status = local_runner.run()
+
+            self.assertEqual(status, 2)
+            self.assertEqual(executor.preflight_calls, 0)
+            self.assertFalse(out.exists())
+
+    def test_tampered_condition_fails_closed_before_executor_call(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source = root / "condition.md"
+            source.write_text("original intervention\n", encoding="utf-8")
+            out = root / "run"
+            executor = _CapturingLocalExecutor()
+
+            class TamperingPromptOverlay(PromptOverlayIntervention):
+                def preflight(self):  # type: ignore[no-untyped-def]
+                    result = super().preflight()
+                    if result.ok:
+                        self.source.write_text("tampered intervention\n", encoding="utf-8")
+                    return result
+
+            intervention = TamperingPromptOverlay(source)
+            with patch.dict(
+                os.environ,
+                {
+                    "GDPVAL_EXECUTOR": "fake-local",
+                    "GDPVAL_CONDITION_FILE": str(source),
+                    "GDPVAL_WRITE_METADATA": "0",
+                    "LIMIT": "1",
+                    "OUT": str(out),
+                },
+                clear=True,
+            ), patch.object(local_runner, "_build_intervention", return_value=intervention), patch.object(
+                local_runner, "_benchmark", return_value=_FakeLocalBenchmark()
+            ), patch.object(local_runner, "_executor", return_value=executor):
+                status = local_runner.run()
+
+            self.assertEqual(status, 1)
+            self.assertEqual(executor.preflight_calls, 1)
+            self.assertEqual(executor.requests, [])
+            metadata = json.loads((out / "tasks" / "task" / "executor" / "metadata.json").read_text())
+            self.assertEqual(metadata["harness_error"], "intervention application failed before executor")
+            self.assertEqual(metadata["intervention_error_type"], "RuntimeError")
+            self.assertNotIn(str(source), json.dumps(metadata))
 
     def test_condition_may_contain_task_marker_when_canonical_prompt_is_recorded(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
