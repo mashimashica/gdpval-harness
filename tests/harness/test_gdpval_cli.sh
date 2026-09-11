@@ -69,6 +69,7 @@ PYTHONPYCACHEPREFIX="$pycache" python3 -m py_compile \
   gdpval_harness/benchmarks/__init__.py \
   gdpval_harness/benchmarks/base.py \
   gdpval_harness/benchmarks/aime26.py \
+  gdpval_harness/benchmarks/bigcodebench.py \
   gdpval_harness/benchmarks/gdpval.py \
   gdpval_harness/executors/__init__.py \
   gdpval_harness/executors/base.py \
