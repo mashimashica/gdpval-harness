@@ -190,10 +190,20 @@ def _generator_info(deliverables: Path) -> dict[str, object]:
 
 def _candidate_task_prompt(deliverables: Path, task_key: str) -> str:
     task_id = task_key.removeprefix("task_")
-    path = _run_root(deliverables) / "tasks" / task_id / "executor" / "prompt.txt"
+    executor_dir = _run_root(deliverables) / "tasks" / task_id / "executor"
+    canonical = executor_dir / "task-prompt.txt"
+    if canonical.is_symlink():
+        raise ValueError(f"candidate canonical task prompt is symlinked for {task_key}: {canonical}")
+    if canonical.is_file():
+        try:
+            return canonical.read_bytes().decode("utf-8")
+        except (OSError, UnicodeDecodeError) as exc:
+            raise ValueError(f"candidate canonical task prompt is not readable UTF-8 for {task_key}: {exc}") from exc
+
+    path = executor_dir / "prompt.txt"
     if not path.is_file():
         raise ValueError(
-            f"candidate run is missing the recorded executor prompt for {task_key}: {path}; "
+            f"candidate run is missing the recorded task provenance for {task_key}: {executor_dir}; "
             "local judging requires provenance from a subscription-backed harness run"
         )
     raw = path.read_bytes()
@@ -534,7 +544,7 @@ def run() -> int:
         "judge_workspace_isolation": "per-trial-system-temp-disjoint-from-candidates-and-output",
         "provenance_write_timing": "after-all-judge-model-calls",
         "local_judge_resume_supported": False,
-        "task_prompt_binding": "candidate-recorded-prompt == current-benchmark-prompt",
+        "task_prompt_binding": "canonical task-prompt.txt when present; legacy recorded wrapper otherwise",
         "tasks": len(pairs),
         "trials_per_task": trials,
         "invalid_trials": invalid_trials,
