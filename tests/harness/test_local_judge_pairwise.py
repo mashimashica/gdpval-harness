@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -87,6 +88,32 @@ class LocalPairwiseTests(unittest.TestCase):
             self.assertFalse((trial.submission_b_dir / "reference_files").exists())
             self.assertNotIn("plain-secret-label", str(trial.workspace))
             self.assertNotIn("alps-secret-label", str(trial.workspace))
+
+    def test_anonymous_staging_normalizes_source_metadata(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            a_root = self._candidate(root, "a")
+            b_root = self._candidate(root, "b")
+            a_source = a_root / "task_x" / "repeat_0" / "artifact.txt"
+            b_source = b_root / "task_x" / "repeat_0" / "artifact.txt"
+            a_source.chmod(0o700)
+            b_source.chmod(0o600)
+            os.utime(a_source, (100, 100))
+            os.utime(b_source, (200, 200))
+
+            _, a, b = matched_tasks(a_root, b_root)[0]
+            trial = prepare_trial(root / "out", "task_x", a, b, trial_index=0, seed=42)
+            staged = [
+                trial.submission_a_dir / "artifact.txt",
+                trial.submission_b_dir / "artifact.txt",
+            ]
+            modes = [path.stat().st_mode & 0o777 for path in staged]
+            mtimes = [path.stat().st_mtime_ns for path in staged]
+            self.assertEqual(modes, [0o444, 0o444])
+            self.assertEqual(mtimes[0], mtimes[1])
+            self.assertNotIn(mtimes[0], {100 * 1_000_000_000, 200 * 1_000_000_000})
+            self.assertEqual(trial.submission_a_dir.stat().st_mode & 0o777, 0o555)
+            self.assertEqual(trial.submission_b_dir.stat().st_mode & 0o777, 0o555)
 
     def test_trial_order_alternates(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
