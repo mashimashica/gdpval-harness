@@ -70,19 +70,8 @@ case "${1-}" in
   --version) echo "claude judge-test"; exit 0 ;;
   auth) echo '{"loggedIn":true,"authMethod":"claude.ai","apiProvider":"firstParty","subscriptionType":"max"}'; exit 0 ;;
   -p)
-    for name in GDPVAL_RUN_A GDPVAL_RUN_B GDPVAL_LABEL_A GDPVAL_LABEL_B SECRET_SHOULD_NOT_REACH_JUDGE; do
-      if [[ -n "${!name:-}" ]]; then
-        echo "candidate identity or unrelated secret leaked into Claude judge: $name" >&2
-        exit 96
-      fi
-    done
-    [[ "$original" == *'--tools Bash'* ]] || exit 95
-    [[ "$original" != *'--tools Bash,Read'* ]] || exit 94
-    [[ "$original" == *'"denyRead":["/"]'* ]] || exit 93
-    [[ "$original" == *'"allowRead"'* ]] || exit 92
-    [[ "$original" == *'"denyWrite":["/"]'* ]] || exit 91
-    printf '\377reason\nBOXED[B]\n'
-    exit 0
+    echo "Claude model execution must not run while read confinement is unverified" >&2
+    exit 88
     ;;
 esac
 exit 98
@@ -115,7 +104,6 @@ $task_prompt
 EOF
   done
 done
-# Task two is intentionally invalid so --limit 2 can verify pre-validation.
 printf 'different reference\n' >"$work/b/task_two/repeat_0/reference_files/ref.txt"
 
 : >"$args"
@@ -144,37 +132,39 @@ grep -q '"local_judge_resume_supported": false' "$work/codex-out/local-judge-sum
 grep -q '"task_prompt_sha256"' "$work/codex-out/local-judge-results.jsonl"
 grep -q 'sandbox --permission-profile gdpval-harness-blind-judge' "$args"
 grep -q '":root"="deny"' "$args"
+python3 - "$work/codex-out/judge/tasks/task_one/trial_0/executor/stdout.log" <<'PY'
+from pathlib import Path
+import sys
+assert "\ufffd" in Path(sys.argv[1]).read_text(encoding="utf-8")
+PY
 if grep -R -q 'must-not-leak\|parent-secret' "$work/codex-out/judge"; then
   echo "secret leaked into Codex judge output" >&2
   exit 1
 fi
 
+# Claude Code remains a policy executor, but blind judging fails closed until a
+# documented non-model read-confinement probe can verify the runtime boundary.
 : >"$args"
-HOME="$home" \
-PATH="$fake_bin:$PATH" \
-ANTHROPIC_API_KEY=must-not-leak \
-CLAUDE_CODE_OAUTH_TOKEN=must-not-leak \
-SECRET_SHOULD_NOT_REACH_JUDGE=parent-secret \
-GDPVAL_BENCHMARK_JSONL="$benchmark" \
-./gdpval compare-runs \
-  --a "$work/a" --b "$work/b" \
-  --label-a baseline-secret-label --label-b intervention-secret-label \
-  --judge-executor claude-code --judge-trials 1 --limit 1 \
-  --out "$work/claude-out" --no-metadata
-
-test -f "$work/claude-out/local-judge-summary.json"
-grep -q -- '--tools Bash' "$args"
-if grep -q -- '--tools Bash,Read' "$args"; then
-  echo "Claude judge still exposes built-in Read" >&2
+if HOME="$home" \
+  PATH="$fake_bin:$PATH" \
+  ANTHROPIC_API_KEY=must-not-leak \
+  CLAUDE_CODE_OAUTH_TOKEN=must-not-leak \
+  SECRET_SHOULD_NOT_REACH_JUDGE=parent-secret \
+  GDPVAL_BENCHMARK_JSONL="$benchmark" \
+  ./gdpval compare-runs \
+    --a "$work/a" --b "$work/b" \
+    --label-a baseline-secret-label --label-b intervention-secret-label \
+    --judge-executor claude-code --judge-trials 1 --limit 1 \
+    --out "$work/claude-out" --no-metadata >/dev/null 2>&1; then
+  echo "Claude blind judge unexpectedly passed unverified read confinement" >&2
   exit 1
 fi
-grep -q '"denyRead":\["/"\]' "$args"
-grep -q '"allowRead"' "$args"
-grep -q '"judge_executor": "claude-code"' "$work/claude-out/local-judge-summary.json"
-if grep -R -q 'must-not-leak\|parent-secret' "$work/claude-out/judge"; then
-  echo "secret leaked into Claude judge output" >&2
+if grep -q '^-p ' "$args"; then
+  echo "Claude blind judge issued a subscription-backed model call before verified confinement" >&2
   exit 1
 fi
+grep -q '^--version' "$args"
+grep -q '^auth status' "$args"
 
 occupied="$work/occupied"
 mkdir -p "$occupied"
