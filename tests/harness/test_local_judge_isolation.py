@@ -26,10 +26,14 @@ for name in GDPVAL_RUN_A GDPVAL_RUN_B GDPVAL_LABEL_A GDPVAL_LABEL_B FORBIDDEN_PA
     exit 91
   fi
 done
+while [[ \"${1-}\" == \"-c\" ]]; do
+  shift 2
+done
 case \"${1-}\" in
   --version) echo \"fake-version\" ;;
   login) echo \"Logged in using ChatGPT\" ;;
   auth) echo '{\"loggedIn\":true,\"authMethod\":\"claude.ai\",\"apiProvider\":\"firstParty\",\"subscriptionType\":\"max\"}' ;;
+  sandbox) exit 0 ;;
   *) exit 92 ;;
 esac
 """,
@@ -57,7 +61,7 @@ esac
             self.assertTrue(result.ok, result.details)
             self.assertEqual(result.auth_mode, "chatgpt-subscription")
 
-    def test_claude_preflight_uses_provenance_free_environment(self) -> None:
+    def test_claude_preflight_fails_closed_without_non_model_read_probe(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             command = self._fake_cli(root, "claude")
@@ -73,8 +77,9 @@ esac
                 clear=False,
             ):
                 result = ClaudeCodeJudgeExecutor(command=str(command)).preflight(_judge_environment())
-            self.assertTrue(result.ok, result.details)
+            self.assertFalse(result.ok)
             self.assertTrue((result.auth_mode or "").startswith("claude-subscription:"))
+            self.assertTrue(any("read confinement" in detail for detail in result.details))
 
     @unittest.skipIf(os.name == "nt", "POSIX system-temp candidate ordering test")
     def test_safe_temp_parent_rejects_caller_temp_inside_candidate_tree(self) -> None:
