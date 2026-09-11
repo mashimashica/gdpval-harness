@@ -37,10 +37,13 @@ class LocalJudgeExecutorTests(unittest.TestCase):
     def test_codex_judge_uses_root_deny_workspace_read_profile(self) -> None:
         with tempfile.TemporaryDirectory() as root:
             base = Path(root)
-            command_path = base / "codex"
+            runtime_root = base / "runtime"
+            runtime_bin = runtime_root / "bin"
+            runtime_bin.mkdir(parents=True)
+            command_path = runtime_bin / "codex"
             command_path.write_text("#!/bin/sh\n", encoding="utf-8")
             command_path.chmod(0o755)
-            request = self.request(root, environment={"PATH": str(base)})
+            request = self.request(root, environment={"PATH": str(runtime_bin)})
             command = CodexJudgeExecutor(command=str(command_path)).build_command(request)
             self.assertEqual(command[:2], [str(command_path), "exec"])
             self.assertNotIn("--sandbox", command)
@@ -55,6 +58,7 @@ class LocalJudgeExecutorTests(unittest.TestCase):
             self.assertIn('":minimal"="read"', profile)
             self.assertIn(json.dumps(str(request.workspace.resolve())), profile)
             self.assertIn(json.dumps(str(command_path.resolve())), profile)
+            self.assertIn(json.dumps(str(runtime_root.resolve())), profile)
             self.assertIn("network={enabled=false}", profile)
             self.assertNotIn("cloud", command)
             self.assertEqual(command[-1], "-")
