@@ -190,10 +190,21 @@ def _generator_info(deliverables: Path) -> dict[str, object]:
 
 def _candidate_task_prompt(deliverables: Path, task_key: str) -> str:
     task_id = task_key.removeprefix("task_")
-    path = _run_root(deliverables) / "tasks" / task_id / "executor" / "prompt.txt"
+    executor_dir = _run_root(deliverables) / "tasks" / task_id / "executor"
+    canonical = executor_dir / "task-prompt.txt"
+    if canonical.is_symlink():
+        raise ValueError(f"candidate canonical task prompt must not be a symlink: {canonical}")
+    if canonical.exists():
+        if not canonical.is_file():
+            raise ValueError(f"candidate canonical task prompt is not a file: {canonical}")
+        return canonical.read_bytes().decode("utf-8", errors="strict")
+
+    # Backward-compatible fallback for runs created before task-prompt.txt was
+    # introduced. New conditioned runs never rely on marker parsing.
+    path = executor_dir / "prompt.txt"
     if not path.is_file():
         raise ValueError(
-            f"candidate run is missing the recorded executor prompt for {task_key}: {path}; "
+            f"candidate run is missing the recorded task prompt for {task_key}: {canonical}; "
             "local judging requires provenance from a subscription-backed harness run"
         )
     raw = path.read_bytes()
@@ -417,7 +428,7 @@ def run() -> int:
     try:
         pairs = matched_tasks(candidate_a, candidate_b)[:limit]
         prompt_hashes = _validate_selected_pairs(candidate_a, candidate_b, pairs, prompts)
-    except (OSError, ValueError) as exc:
+    except (OSError, ValueError, UnicodeDecodeError) as exc:
         print(f"gdpval: local judge candidate validation failed: {exc}", file=sys.stderr)
         return 2
 
@@ -534,7 +545,7 @@ def run() -> int:
         "judge_workspace_isolation": "per-trial-system-temp-disjoint-from-candidates-and-output",
         "provenance_write_timing": "after-all-judge-model-calls",
         "local_judge_resume_supported": False,
-        "task_prompt_binding": "candidate-recorded-prompt == current-benchmark-prompt",
+        "task_prompt_binding": "candidate-recorded-canonical-prompt == current-benchmark-prompt",
         "tasks": len(pairs),
         "trials_per_task": trials,
         "invalid_trials": invalid_trials,

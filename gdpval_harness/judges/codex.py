@@ -324,7 +324,11 @@ class CodexJudgeExecutor(JudgeExecutor):
             "--skip-git-repo-check",
             "--ignore-user-config",
             "-c",
+            'forced_login_method="chatgpt"',
+            "-c",
             'approval_policy="never"',
+            "-c",
+            'web_search="disabled"',
         ]
         command.extend(_profile_overrides(request.workspace, runtime_read_paths))
         command.extend(
@@ -404,8 +408,10 @@ class CodexJudgeExecutor(JudgeExecutor):
                 "sandbox": "permission-profile/root-deny/workspace-read-only",
                 "read_confinement": "root-deny + minimal-read + anonymous-workspace-read",
                 "network_policy": "disabled by permission profile",
+                "web_search": "disabled",
                 "shell_environment_policy": "anonymous-minimal-no-parent-inheritance",
                 "cloud_execution": False,
+                "forced_login_method": "chatgpt",
                 "parse_error": parse_error,
             },
         )
