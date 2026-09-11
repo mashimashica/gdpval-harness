@@ -210,6 +210,31 @@ def _preflight_failure(prefix: str, details: object) -> RuntimeError:
     return RuntimeError(f"{prefix} preflight failed: {message}")
 
 
+def _canonical_planned_root(path: Path, *, existing_message: str) -> Path:
+    """Return a canonical root that is still fresh and has no root symlink."""
+
+    if path.exists() or path.is_symlink():
+        raise FileExistsError(existing_message)
+    try:
+        canonical = path.resolve(strict=False)
+    except (OSError, RuntimeError) as exc:
+        raise ValueError(f"could not resolve planned output root: {path}") from exc
+    # A parent symlink can make a non-existent spelling resolve to an existing
+    # path.  Check the canonical spelling too so neither root can be reused.
+    if canonical.exists() or canonical.is_symlink():
+        raise FileExistsError(existing_message)
+    return canonical
+
+
+def _ensure_roots_are_separate(out_root: Path, runtime_root: Path) -> None:
+    if (
+        out_root == runtime_root
+        or out_root in runtime_root.parents
+        or runtime_root in out_root.parents
+    ):
+        raise ValueError("out_dir and runtime_root must be separate, non-overlapping roots")
+
+
 def _evaluator_metadata(evaluator: Evaluator, preflight: EvaluatorPreflightResult) -> dict[str, object]:
     evaluator_id = getattr(preflight, "name", None) or getattr(evaluator, "name", type(evaluator).__name__)
     evaluator_type = getattr(preflight, "evaluator_type", None) or getattr(evaluator, "evaluator_type", None)
@@ -349,6 +374,7 @@ class RunSummary:
     benchmark: str
     executor: str
     out_dir: Path
+    runtime_root: Path
     status: str
     task_count: int
     metrics: Mapping[str, float]
@@ -365,6 +391,7 @@ def run_benchmark(
     model: str | None = None,
     timeout_seconds: float = 12600.0,
     intervention: Intervention | None = None,
+    runtime_root: Path | None = None,
 ) -> RunSummary:
     """Run benchmark tasks using the injected evaluator and executor."""
 
@@ -374,8 +401,22 @@ def run_benchmark(
         raise ValueError("--limit must be positive")
     if timeout_seconds <= 0:
         raise ValueError("--executor-timeout must be positive")
-    if out_dir.exists() or out_dir.is_symlink():
-        raise FileExistsError(f"refusing to overwrite existing run directory: {out_dir}")
+    out_root = _canonical_planned_root(
+        out_dir,
+        existing_message=f"refusing to overwrite existing run directory: {out_dir}",
+    )
+    if runtime_root is None:
+        effective_runtime_root = out_root
+        runtime_layout = "run-output"
+        runtime_layout_root: Path | None = None
+    else:
+        effective_runtime_root = _canonical_planned_root(
+            runtime_root,
+            existing_message=f"refusing to overwrite existing runtime directory: {runtime_root}",
+        )
+        _ensure_roots_are_separate(out_root, effective_runtime_root)
+        runtime_layout = "external-persistent"
+        runtime_layout_root = effective_runtime_root
 
     # Evaluator readiness is checked first.  This prevents an executor from
     # consuming a model call when the requested evaluation path is unavailable.
@@ -389,6 +430,8 @@ def run_benchmark(
     intervention_bundle = intervention_preflight.bundle
     if intervention_bundle is not None and isinstance(intervention_bundle.root, Path):
         ensure_source_output_separation(intervention_bundle, out_dir)
+        if runtime_root is not None:
+            ensure_source_output_separation(intervention_bundle, effective_runtime_root)
 
     executor_preflight = executor.preflight()
     if not executor_preflight.ok:
@@ -402,7 +445,11 @@ def run_benchmark(
     # a later invalid task must not leave an earlier task partially executed.
     plans: list[EvaluationPlan] = []
     for task in tasks:
-        layout = task_layout(out_dir, task.execution.task_id)
+        layout = task_layout(
+            out_dir,
+            task.execution.task_id,
+            runtime_root=runtime_layout_root,
+        )
         plan = EvaluationPlan(
             task_id=task.execution.task_id,
             task_prompt=task.execution.prompt,
@@ -414,6 +461,8 @@ def run_benchmark(
         intervention.validate_task(task.execution)
         plans.append(plan)
     out_dir.mkdir(parents=True, exist_ok=False)
+    if runtime_root is not None:
+        effective_runtime_root.mkdir(parents=True, exist_ok=False)
     started_at = _now()
     metadata_path = out_dir / "run-metadata.json"
     results_path = out_dir / "results.jsonl"
@@ -421,7 +470,7 @@ def run_benchmark(
     evaluator_info = _evaluator_metadata(evaluator, evaluator_preflight)
     intervention_info = _intervention_metadata(intervention, intervention_preflight)
     base_metadata: dict[str, object] = {
-        "schema_version": 2,
+        "schema_version": 3,
         "benchmark": benchmark.name,
         "benchmark_revision": getattr(benchmark, "revision", None),
         "evaluator_id": evaluator_info["id"],
@@ -439,6 +488,8 @@ def run_benchmark(
         "model": model,
         "network_policy": network_policy,
         "limit": limit,
+        "runtime_root": str(effective_runtime_root),
+        "runtime_layout": runtime_layout,
         "started_at": started_at,
         "status": "running",
     }
@@ -451,7 +502,11 @@ def run_benchmark(
     try:
         with results_path.open("x", encoding="utf-8", newline="\n") as results_handle:
             for task, plan in zip(tasks, plans):
-                layout = task_layout(out_dir, task.execution.task_id)
+                layout = task_layout(
+                    out_dir,
+                    task.execution.task_id,
+                    runtime_root=runtime_layout_root,
+                )
                 layout.workspace.mkdir(parents=True, exist_ok=False)
                 layout.executor_dir.mkdir(parents=True, exist_ok=False)
                 layout.workspace_deliverables.mkdir(parents=True, exist_ok=True)
@@ -634,6 +689,7 @@ def run_benchmark(
         benchmark=benchmark.name,
         executor=executor.name,
         out_dir=out_dir,
+        runtime_root=effective_runtime_root,
         status=run_status,
         task_count=len(rows),
         metrics=metrics,

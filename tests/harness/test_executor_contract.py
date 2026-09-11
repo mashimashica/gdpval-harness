@@ -42,6 +42,24 @@ class ExecutorContractTests(unittest.TestCase):
             self.assertEqual(second.workspace.parent.name, "repeat_1")
             self.assertEqual(second.judge_deliverables.name, "repeat_1")
 
+    def test_external_runtime_root_moves_only_task_runtime_paths(self) -> None:
+        with tempfile.TemporaryDirectory() as root:
+            base = Path(root)
+            run_output = base / "run-output"
+            runtime = base / "runtime"
+            layout = task_layout(run_output, "abc/123", repeat=1, runtime_root=runtime)
+
+            self.assertEqual(layout.workspace, runtime / "tasks" / "abc_123" / "repeat_1" / "workspace")
+            self.assertEqual(layout.executor_dir, runtime / "tasks" / "abc_123" / "repeat_1" / "executor")
+            self.assertEqual(
+                layout.workspace_deliverables,
+                runtime / "tasks" / "abc_123" / "repeat_1" / "workspace" / "deliverables",
+            )
+            self.assertEqual(
+                layout.judge_deliverables,
+                run_output / "deliverables" / "task_abc_123" / "repeat_1",
+            )
+
     def test_negative_repeat_is_rejected(self) -> None:
         with tempfile.TemporaryDirectory() as root:
             with self.assertRaises(ValueError):

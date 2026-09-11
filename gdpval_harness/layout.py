@@ -27,11 +27,17 @@ class TaskLayout:
     judge_deliverables: Path
 
 
-def task_layout(run_root: Path, task_id: str, repeat: int = 0) -> TaskLayout:
+def task_layout(
+    run_root: Path,
+    task_id: str,
+    repeat: int = 0,
+    *,
+    runtime_root: Path | None = None,
+) -> TaskLayout:
     if repeat < 0:
         raise ValueError("repeat must be non-negative")
     safe_id = safe_task_id(task_id)
-    task_root = run_root / "tasks" / safe_id
+    task_root = (runtime_root if runtime_root is not None else run_root) / "tasks" / safe_id
     # Preserve the established repeat_0 path while isolating any additional
     # repeats so their workspace and executor logs cannot overwrite each other.
     if repeat:

@@ -618,6 +618,167 @@ class GenericRunnerTests(unittest.TestCase):
             self.assertEqual(metadata["evaluation_status_counts"], {"completed": 2})
             self.assertEqual(metadata["evaluator_id"], "fake-evaluator")
 
+    def test_external_runtime_root_persists_task_runtime_and_keeps_judge_output_in_run(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            out = root / "run"
+            runtime = root / "runtime"
+            summary = run_benchmark(
+                FakeBenchmark(task_count=1),
+                GDPvalExternalEvaluator(),
+                FakeExecutor(),
+                out_dir=out,
+                limit=1,
+                runtime_root=runtime,
+            )
+
+            runtime_task = runtime / "tasks" / "task-0"
+            self.assertEqual(summary.runtime_root, runtime.resolve())
+            self.assertEqual(summary.out_dir, out)
+            self.assertTrue((runtime_task / "workspace" / "input.txt").is_file())
+            self.assertTrue((runtime_task / "executor" / "stdout.log").is_file())
+            self.assertTrue((runtime_task / "executor" / "task-prompt.txt").is_file())
+            self.assertTrue((runtime_task / "result.json").is_file())
+            self.assertTrue((runtime_task / "workspace" / "deliverables").is_dir())
+            self.assertFalse((out / "tasks").exists())
+            self.assertTrue((out / "results.jsonl").is_file())
+            self.assertTrue((out / "run-metadata.json").is_file())
+            self.assertTrue((out / "deliverables" / "task_task-0" / "repeat_0").is_dir())
+
+            metadata = json.loads((out / "run-metadata.json").read_text(encoding="utf-8"))
+            self.assertEqual(metadata["schema_version"], 3)
+            self.assertEqual(metadata["runtime_root"], str(runtime.resolve()))
+            self.assertEqual(metadata["runtime_layout"], "external-persistent")
+
+    def test_external_runtime_workspace_is_separate_from_control_profile_tree(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            control = root / "control"
+            profile = control / "profile"
+            profile.mkdir(parents=True)
+            (control / "AGENTS.md").write_text("control-profile-sentinel\n", encoding="utf-8")
+            out = profile / "run-output"
+            runtime = root / "neutral-runtime"
+            assigned_workspaces: list[Path] = []
+
+            class CapturingExecutor(FakeExecutor):
+                def execute(self, request: ExecutionRequest) -> ExecutionResult:
+                    assigned_workspaces.append(request.workspace)
+                    return super().execute(request)
+
+            run_benchmark(
+                FakeBenchmark(task_count=1),
+                FakeEvaluator(),
+                CapturingExecutor(),
+                out_dir=out,
+                limit=1,
+                runtime_root=runtime,
+            )
+
+            self.assertEqual(len(assigned_workspaces), 1)
+            workspace = assigned_workspaces[0].resolve()
+            runtime_resolved = runtime.resolve()
+            control_resolved = control.resolve()
+            self.assertIn(runtime_resolved, workspace.parents)
+            self.assertNotIn(control_resolved, workspace.parents)
+            # Harness path separation only; this does not claim OS read confinement.
+            self.assertEqual(list(runtime.rglob("AGENTS.md")), [])
+            self.assertFalse((workspace / "AGENTS.md").exists())
+
+    def test_default_runtime_metadata_maps_to_canonical_run_output(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp) / "run"
+            summary = run_benchmark(FakeBenchmark(task_count=1), FakeEvaluator(), FakeExecutor(), out_dir=out, limit=1)
+
+            self.assertEqual(summary.runtime_root, out.resolve())
+            metadata = json.loads((out / "run-metadata.json").read_text(encoding="utf-8"))
+            self.assertEqual(metadata["schema_version"], 3)
+            self.assertEqual(metadata["runtime_root"], str(out.resolve()))
+            self.assertEqual(metadata["runtime_layout"], "run-output")
+
+    def test_external_runtime_root_must_be_fresh_and_separate(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            out = root / "run"
+            runtime = root / "runtime"
+            runtime.mkdir()
+            marker = runtime / "keep.txt"
+            marker.write_text("keep", encoding="utf-8")
+            executor = FakeExecutor()
+
+            with self.assertRaises(FileExistsError):
+                run_benchmark(
+                    FakeBenchmark(task_count=1),
+                    FakeEvaluator(),
+                    executor,
+                    out_dir=out,
+                    limit=1,
+                    runtime_root=runtime,
+                )
+
+            self.assertEqual(executor.preflight_calls, 0)
+            self.assertFalse(out.exists())
+            self.assertEqual(marker.read_text(encoding="utf-8"), "keep")
+
+            symlink_target = root / "runtime-target"
+            symlink_target.mkdir()
+            symlink_marker = symlink_target / "keep.txt"
+            symlink_marker.write_text("keep", encoding="utf-8")
+            runtime_link = root / "runtime-link"
+            runtime_link.symlink_to(symlink_target, target_is_directory=True)
+            with self.assertRaises(FileExistsError):
+                run_benchmark(
+                    FakeBenchmark(task_count=1),
+                    FakeEvaluator(),
+                    executor,
+                    out_dir=out,
+                    limit=1,
+                    runtime_root=runtime_link,
+                )
+            self.assertFalse(out.exists())
+            self.assertEqual(symlink_marker.read_text(encoding="utf-8"), "keep")
+
+            with self.assertRaises(ValueError):
+                run_benchmark(
+                    FakeBenchmark(task_count=1),
+                    FakeEvaluator(),
+                    executor,
+                    out_dir=out,
+                    limit=1,
+                    runtime_root=out / "runtime",
+                )
+            self.assertFalse(out.exists())
+
+    def test_external_runtime_root_intervention_source_overlap_fails_before_executor(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source = root / "source"
+            skill = source / "skill"
+            skill.mkdir(parents=True)
+            (skill / "SKILL.md").write_text(
+                "---\nname: skill\ndescription: overlap\n---\n",
+                encoding="utf-8",
+            )
+            runtime = skill / "runtime"
+            out = root / "run"
+            executor = FakeExecutor()
+            intervention = AgentSkillIntervention(load_agent_skill_bundle(skill))
+
+            with self.assertRaisesRegex(ValueError, "source and output paths must be separate"):
+                run_benchmark(
+                    FakeBenchmark(task_count=1),
+                    FakeEvaluator(),
+                    executor,
+                    out_dir=out,
+                    limit=1,
+                    intervention=intervention,
+                    runtime_root=runtime,
+                )
+
+            self.assertEqual(executor.preflight_calls, 0)
+            self.assertFalse(out.exists())
+            self.assertFalse(runtime.exists())
+
     def test_external_status_is_visible_and_not_aggregated(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             out = Path(tmp) / "run"

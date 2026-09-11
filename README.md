@@ -54,6 +54,18 @@ The generic runner composes the registered `Benchmark × Executor × Interventio
 
 The `agent-skill` intervention accepts the exact Skill directory, whose frontmatter `name` must match the directory name, and applies the portable `workspace-reference` method. The canonical external source directory/reference is recorded only in outer run metadata; bundle, manifest, and file hashes are the stable evidence, and the reference is absent from per-task application records. It validates `SKILL.md` frontmatter and the Agent Skills `name` rules from the [official specification](https://agentskills.io/specification); the harness separately requires strict UTF-8, regular files only, and rejects symlinks, special files, path escapes, collisions, overwrites, and source tampering. It materializes a neutral `.gdpval/interventions/<name>/SKILL.md` path and all validated resources in the executor workspace. The current Codex, Claude, and Cursor workspace-reading adapters follow the [executor request contract](gdpval_harness/executors/base.py): the workspace is their working directory and the derived `TaskSpec` prompt is supplied to them, so the same reference works portably across those adapters. This path does not discover native `.agents/`, `.claude/`, or `.cursor/` directories and has no silent fallback. Generic GDPval evaluation remains external.
 
+### Programmatic Builder pre-stage
+
+The experiment architecture remains `Benchmark × Executor × Intervention × Evaluator`. A programmatic Builder is a pre-stage that creates an intervention before an application run: `Builder -> sealed InterventionBundle`, then `AgentSkillIntervention(bundle) -> fresh application run`. Builder is not a fifth experiment axis. `TaskSpec` still contains only `task_id` and the canonical prompt. The generic `ExecutorSkillBuilder` receives that `TaskSpec` plus explicit allowlisted creation-time `BuilderInputBundle`s; it never receives evaluation metadata, a rubric, or a reference answer.
+
+`ExecutorSkillBuilder` stages those inputs under neutral paths, runs the builder executor, and requires exactly one generated Skill directory whose name matches the `name` in `SKILL.md`. The Agent Skill loader validates the generated tree. The validated tree is then copied into a separately sealed artifact root. Only that sealed bundle crosses into a distinct application workspace and executor invocation through `AgentSkillIntervention`; no Builder `ExecutionResult`, conversation, session, or resume state is handed off.
+
+Builder logs, workspace files, and generated deliverables live under the caller-supplied persistent build runtime and remain durable. For application runs, `run_benchmark(..., runtime_root=...)` can put task workspaces, executor logs, and task result records in a fresh external neutral root while judge-compatible deliverables and run metadata remain under `out_dir`. With no `runtime_root`, the default runtime layout is unchanged, preserving `./gdpval compare-runs` discovery.
+
+Builds and runs refuse to overwrite roots and keep source, build runtime, sealed artifact, application runtime, and output roots separate. Creation inputs use an explicit allowlist; the Builder does not copy arbitrary `HOME`, authentication, history, or profile directories.
+
+These controls mechanically separate harness-provided prompt, environment, session, workspace, and file handoff. They do not prove semantic non-leakage within model-generated Skill prose or establish OS-level filesystem read confinement for Codex, Claude, or Cursor. Native read confinement remains unverified, so callers should place application runtime in a dedicated neutral root. This flow does not add a generic sandbox.
+
 ## Subscription/account-backed local executors
 
 List supported runtimes:
