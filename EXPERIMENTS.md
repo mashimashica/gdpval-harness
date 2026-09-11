@@ -27,7 +27,7 @@ Run the intervention condition:
   --out runs/intervention
 ```
 
-Then compare the completed deliverables independently:
+Then compare the completed deliverables independently using the verified local blind-judge path:
 
 ```bash
 ./gdpval compare-runs \
@@ -35,7 +35,7 @@ Then compare the completed deliverables independently:
   --b runs/intervention/deliverables \
   --label-a plain \
   --label-b intervention \
-  --judge-executor claude-code \
+  --judge-executor codex \
   --judge-trials 2 \
   --limit 10 \
   --out runs/comparison
@@ -76,4 +76,6 @@ Keep the condition file together with the run metadata when publishing or review
 
 ## Codex subscription boundary
 
-For Codex local policy execution and Codex local judging, the harness sets `forced_login_method="chatgpt"`. When model-generated network access is disabled, policy execution also sets `web_search="disabled"`; the read-only local Codex judge always disables web search. These controls supplement the existing API-credential scrubbing and login-status preflight so the subscription-backed path fails closed instead of silently switching authentication modes.
+For Codex local policy execution and Codex local judging, the harness sets `forced_login_method="chatgpt"`. When model-generated network access is disabled, policy execution also sets `web_search="disabled"`; the local Codex judge always disables web search and retains the verified root-deny/workspace-read permission profile. These controls supplement the existing API-credential scrubbing and login-status preflight so the subscription-backed path fails closed instead of silently switching authentication modes.
+
+Claude Code remains available as a subscription-backed policy executor, but its local blind-judge path currently fails closed before `claude -p` because the harness cannot verify read confinement through a documented non-model probe. Use Codex or human validation for blind comparison until that boundary can be established.
