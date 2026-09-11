@@ -47,9 +47,10 @@ class ExecutorContractTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 task_layout(Path(root), "task", repeat=-1)
 
-    def test_task_contract_has_no_provider_fields(self) -> None:
+    def test_task_contract_has_no_provider_or_benchmark_fields(self) -> None:
         task = TaskSpec(task_id="x", prompt="do work")
         self.assertEqual(task.task_id, "x")
+        self.assertEqual(set(TaskSpec.__dataclass_fields__), {"task_id", "prompt"})
         self.assertEqual(ExecutionStatus.COMPLETED.value, "completed")
 
     def test_safe_task_id_rejects_empty_value(self) -> None:

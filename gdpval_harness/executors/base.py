@@ -20,12 +20,10 @@ class ExecutionStatus(StrEnum):
 
 @dataclass(frozen=True)
 class TaskSpec:
+    """Executor-facing task contract; benchmark/evaluator metadata lives elsewhere."""
+
     task_id: str
     prompt: str
-    reference_files: tuple[str, ...] = ()
-    reference_file_urls: tuple[str, ...] = ()
-    sector: str = ""
-    occupation: str = ""
 
 
 @dataclass(frozen=True)
@@ -65,7 +63,7 @@ class PreflightResult:
 
 
 class Executor(ABC):
-    """Agent runtime contract; policy providers and judges are separate concerns."""
+    """Agent runtime contract; benchmarks, interventions, providers, and evaluators are separate concerns."""
 
     name: str
     invocation_mode: str
