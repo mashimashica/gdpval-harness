@@ -12,6 +12,8 @@ import sys
 from pathlib import Path
 from typing import Iterable
 
+from gdpval_harness.benchmarks.base import BenchmarkTask
+from gdpval_harness.benchmarks.gdpval import GDPvalBenchmark
 from gdpval_harness.executors.base import ExecutionRequest, ExecutionResult, ExecutionStatus, TaskSpec
 from gdpval_harness.executors.claude_code import ClaudeCodeExecutor
 from gdpval_harness.executors.codex import CodexExecutor
@@ -26,6 +28,10 @@ BENCHMARK_JSONL = Path(
 PREPARE_SCRIPT = Path(os.getenv("GDPVAL_PREPARE_SCRIPT", ROOT / "benchmarks" / "gdpval" / "prepare.py"))
 _TERMINAL_SUCCESS = {ExecutionStatus.COMPLETED, ExecutionStatus.NO_DELIVERABLE}
 _MAX_CONDITION_FILE_BYTES = 1024 * 1024
+
+
+def _benchmark() -> GDPvalBenchmark:
+    return GDPvalBenchmark(root=ROOT, dataset_path=BENCHMARK_JSONL, prepare_script=PREPARE_SCRIPT)
 
 
 def _truthy(name: str) -> bool:
@@ -67,7 +73,8 @@ def _condition_file() -> Path | None:
         raise ValueError(f"could not inspect --condition-file: {exc}") from exc
     if size > _MAX_CONDITION_FILE_BYTES:
         raise ValueError(
-            f"--condition-file exceeds {_MAX_CONDITION_FILE_BYTES} bytes; keep experiment instructions small and reviewable"
+            f"--condition-file exceeds {_MAX_CONDITION_FILE_BYTES} bytes; "
+            "keep experiment instructions small and reviewable"
         )
     return path
 
@@ -135,87 +142,21 @@ def _validate_resume_condition(out_dir: Path) -> None:
     }
     if existing != current:
         raise ValueError(
-            "--resume condition provenance differs from the existing run; use the original condition label/file or a new output directory"
+            "--resume condition provenance differs from the existing run; "
+            "use the original condition label/file or a new output directory"
         )
 
 
 def _ensure_dataset() -> None:
-    if BENCHMARK_JSONL.is_file():
-        return
-    if not PREPARE_SCRIPT.is_file():
-        raise RuntimeError(f"GDPval prepare script not found: {PREPARE_SCRIPT}")
-    result = subprocess.run([sys.executable, str(PREPARE_SCRIPT)], cwd=ROOT, check=False)
-    if result.returncode != 0 or not BENCHMARK_JSONL.is_file():
-        raise RuntimeError("failed to prepare GDPval benchmark data")
+    _benchmark().prepare()
 
 
-def _parse_sequence(value: object) -> tuple[str, ...]:
-    if value is None:
-        return ()
-    if isinstance(value, str):
-        try:
-            value = json.loads(value)
-        except json.JSONDecodeError:
-            return (value,)
-    if isinstance(value, list):
-        return tuple(str(item) for item in value)
-    return ()
+def _load_tasks(limit: int) -> list[BenchmarkTask]:
+    return list(_benchmark().load_tasks(limit))
 
 
-def _load_tasks(limit: int) -> list[TaskSpec]:
-    tasks: list[TaskSpec] = []
-    with BENCHMARK_JSONL.open(encoding="utf-8") as handle:
-        for line in handle:
-            if not line.strip():
-                continue
-            row = json.loads(line)
-            tasks.append(
-                TaskSpec(
-                    task_id=str(row["task_id"]),
-                    prompt=str(row["prompt"]),
-                    reference_files=_parse_sequence(row.get("reference_files")),
-                    reference_file_urls=_parse_sequence(row.get("reference_file_urls")),
-                    sector=str(row.get("sector") or ""),
-                    occupation=str(row.get("occupation") or ""),
-                )
-            )
-            if len(tasks) >= limit:
-                break
-    if not tasks:
-        raise RuntimeError(f"no GDPval tasks found in {BENCHMARK_JSONL}")
-    return tasks
-
-
-def _is_inside(root: Path, path: Path) -> bool:
-    try:
-        path.resolve().relative_to(root.resolve())
-        return True
-    except ValueError:
-        return False
-
-
-def _materialize_reference_files(task: TaskSpec, workspace: Path) -> list[str]:
-    if not task.reference_files and not task.reference_file_urls:
-        return []
-    if len(task.reference_files) != len(task.reference_file_urls):
-        raise RuntimeError(f"task {task.task_id}: reference file/url count mismatch")
-
-    from responses_api_agents.stirrup_agent.tasks.gdpval import _download_reference_files
-
-    downloaded = _download_reference_files(
-        list(task.reference_files),
-        list(task.reference_file_urls),
-        workspace,
-    )
-    if len(downloaded) != len(task.reference_files):
-        raise RuntimeError(
-            f"task {task.task_id}: materialized {len(downloaded)}/{len(task.reference_files)} reference files"
-        )
-    for relative in downloaded:
-        target = workspace / relative
-        if not _is_inside(workspace, target) or not target.is_file():
-            raise RuntimeError(f"task {task.task_id}: unsafe or missing materialized reference path: {relative}")
-    return downloaded
+def _materialize_reference_files(task: BenchmarkTask, workspace: Path) -> list[str]:
+    return list(_benchmark().materialize(task, workspace))
 
 
 def _reference_listing(workspace: Path) -> str:
@@ -241,7 +182,8 @@ Additional experiment-condition instructions:
 {condition_instructions}
 </condition_instructions>
 
-Apply these instructions while completing the task. They are an external experimental intervention, not part of GDPval itself.
+Apply these instructions while completing the task. They are an external experimental intervention,
+not part of GDPval itself.
 """
     return f"""You are completing a GDPval professional-work task in an isolated local workspace.
 
@@ -383,13 +325,20 @@ def preflight(executor_name: str, out_dir: Path, *, for_run: bool) -> tuple[bool
     try:
         executor = _executor(executor_name)
     except ValueError as exc:
-        return False, {"executor": executor_name, "ok": False, "version": None, "auth_mode": None, "details": [str(exc)]}
+        return False, {
+            "executor": executor_name,
+            "ok": False,
+            "version": None,
+            "auth_mode": None,
+            "details": [str(exc)],
+        }
 
     result = executor.preflight()
     details = list(result.details)
     ok = result.ok
 
-    if not BENCHMARK_JSONL.is_file() and not PREPARE_SCRIPT.is_file():
+    benchmark = _benchmark()
+    if not benchmark.is_prepared() and not PREPARE_SCRIPT.is_file():
         details.append(f"GDPval benchmark data is absent and prepare script is missing: {PREPARE_SCRIPT}")
         ok = False
 
@@ -429,7 +378,7 @@ def preflight(executor_name: str, out_dir: Path, *, for_run: bool) -> tuple[bool
 
     details.append(
         "benchmark data present"
-        if BENCHMARK_JSONL.is_file()
+        if benchmark.is_prepared()
         else "benchmark JSONL is not prepared yet; run will invoke the existing GDPval prepare script"
     )
     if os.getenv("GDPVAL_CONDITION"):
@@ -483,7 +432,8 @@ def run() -> int:
     network_policy = os.getenv("GDPVAL_EXECUTOR_NETWORK", "disabled")
 
     failures = 0
-    for task in _load_tasks(limit):
+    for benchmark_task in _load_tasks(limit):
+        task = benchmark_task.execution
         layout = task_layout(out_dir, task.task_id)
         if resume and _already_completed(layout):
             print(f"gdpval[{executor_name}]: skip terminal task {task.task_id}", file=sys.stderr)
@@ -494,7 +444,7 @@ def run() -> int:
         # and any experiment-condition text. Blind judging uses this file when present.
         (layout.executor_dir / "task-prompt.txt").write_text(task.prompt, encoding="utf-8")
         try:
-            _materialize_reference_files(task, layout.workspace)
+            _materialize_reference_files(benchmark_task, layout.workspace)
             prompt_task = TaskSpec(
                 task_id=task.task_id,
                 prompt=build_task_prompt(
@@ -503,10 +453,6 @@ def run() -> int:
                     network_policy=network_policy,
                     condition_instructions=condition_instructions,
                 ),
-                reference_files=task.reference_files,
-                reference_file_urls=task.reference_file_urls,
-                sector=task.sector,
-                occupation=task.occupation,
             )
             request = ExecutionRequest(
                 task=prompt_task,
