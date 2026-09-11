@@ -66,6 +66,9 @@ PYTHONPYCACHEPREFIX="$pycache" python3 -m py_compile \
   gdpval_harness/layout.py \
   gdpval_harness/local_runner.py \
   gdpval_harness/local_judge_runner.py \
+  gdpval_harness/benchmarks/__init__.py \
+  gdpval_harness/benchmarks/base.py \
+  gdpval_harness/benchmarks/gdpval.py \
   gdpval_harness/executors/__init__.py \
   gdpval_harness/executors/base.py \
   gdpval_harness/executors/claude_code.py \
