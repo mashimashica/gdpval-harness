@@ -192,6 +192,7 @@ class ExecutorSkillBuilderTests(unittest.TestCase):
             self.assertEqual(preflight.builder_executor, "deterministic")
             self.assertEqual(preflight.builder_executor_version, "deterministic-1")
             self.assertEqual(preflight.builder_executor_auth_mode, "test-login")
+            self.assertEqual(preflight.builder_executor_invocation_mode, "deterministic-test")
             result = builder.build(self._request(root))
             self.assertEqual(result.status, BuildStatus.FAILED)
             self.assertEqual(result.failure_phase, BuildFailurePhase.PREFLIGHT)
@@ -213,6 +214,7 @@ class ExecutorSkillBuilderTests(unittest.TestCase):
                 preflight = builder.preflight()
                 self.assertFalse(preflight.ok)
                 self.assertEqual(executor.preflight_calls, 1)
+                self.assertEqual(preflight.builder_executor_invocation_mode, "deterministic-test")
                 if exception_type is not None:
                     self.assertEqual(preflight.details, (f"executor preflight raised {exception_type}",))
                     self.assertNotIn("PREFLIGHT-SECRET-SENTINEL", preflight.details[0])
@@ -431,7 +433,11 @@ class ExecutorSkillBuilderTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             build_executor = DeterministicExecutor()
-            result = ExecutorSkillBuilder(build_executor).build(self._request(root))
+            builder = ExecutorSkillBuilder(build_executor)
+            preflight = builder.preflight()
+            self.assertTrue(preflight.ok)
+            self.assertEqual(preflight.builder_executor_invocation_mode, "deterministic-test")
+            result = builder.build(self._request(root))
             self.assertEqual(result.status, BuildStatus.COMPLETED)
             assert result.bundle is not None
             self.assertIsNone(AgentSkillIntervention(result.bundle).source_reference)

@@ -264,9 +264,15 @@ class BuilderPreflightResult:
     builder_executor_version: str | None = None
     builder_executor_auth_mode: str | None = None
     details: Sequence[str] = ()
+    builder_executor_invocation_mode: str | None = None
 
     def __post_init__(self) -> None:
         _require_nonempty_text("builder preflight name", self.name)
+        if self.builder_executor_invocation_mode is not None:
+            _require_nonempty_text(
+                "builder preflight builder_executor_invocation_mode",
+                self.builder_executor_invocation_mode,
+            )
         try:
             details = tuple(str(detail) for detail in self.details)
         except TypeError as exc:

@@ -8,7 +8,7 @@ from __future__ import annotations
 import json
 import os
 import secrets
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from numbers import Real
 from pathlib import Path
@@ -23,6 +23,7 @@ from gdpval_harness.evaluators.base import (
     EvaluationStatus,
     Evaluator,
     EvaluatorPreflightResult,
+    EvaluatorType,
 )
 from gdpval_harness.executors.base import ExecutionRequest, ExecutionResult, ExecutionStatus, Executor
 from gdpval_harness.interventions.base import (
@@ -32,7 +33,14 @@ from gdpval_harness.interventions.base import (
     ensure_source_output_separation,
 )
 from gdpval_harness.interventions.none import NoneIntervention
-from gdpval_harness.layout import task_layout
+from gdpval_harness.layout import safe_task_id, task_layout
+from gdpval_harness.provenance import (
+    RepositoryProvenance,
+    canonical_json_sha256,
+    execution_record,
+    repository_provenance,
+    task_sha256,
+)
 
 
 _SUCCESS_STATUSES = {ExecutionStatus.COMPLETED, ExecutionStatus.NO_DELIVERABLE}
@@ -138,20 +146,7 @@ def _evaluation_interrupt_payload(exc: BaseException) -> dict[str, object]:
 
 
 def _execution_payload(result: ExecutionResult) -> dict[str, object]:
-    return {
-        "status": str(_value(result.status)),
-        "executor": result.executor,
-        "executor_version": result.executor_version,
-        "invocation_mode": result.invocation_mode,
-        "auth_mode": result.auth_mode,
-        "workspace": str(result.workspace),
-        "deliverables_dir": str(result.deliverables_dir),
-        "started_at": result.started_at,
-        "finished_at": result.finished_at,
-        "exit_code": result.exit_code,
-        "output_text_present": bool(result.output_text),
-        "metadata": dict(result.metadata),
-    }
+    return execution_record(result)
 
 
 def _aggregate_metrics(rows: list[dict[str, object]]) -> dict[str, float]:
@@ -245,22 +240,71 @@ def _evaluator_metadata(evaluator: Evaluator, preflight: EvaluatorPreflightResul
     evaluator_revision = getattr(preflight, "revision", None)
     if evaluator_revision is None:
         evaluator_revision = getattr(evaluator, "revision", None)
-    payload: dict[str, object] = {
-        "id": evaluator_id,
-        "type": evaluator_type_value,
-        "version": evaluator_version,
-        "revision": evaluator_revision,
-        "preflight_details": list(getattr(preflight, "details", ()) or ()),
-    }
-    judge = {
+    details = tuple(getattr(preflight, "details", ()) or ())
+    judge_fields = {
         "executor": getattr(preflight, "judge_executor", None),
         "version": getattr(preflight, "judge_executor_version", None),
         "auth_mode": getattr(preflight, "judge_auth_mode", None),
         "model": getattr(preflight, "judge_model", None),
     }
-    if any(value is not None for value in judge.values()):
-        payload["judge"] = judge
+    judge_applicable = evaluator_type_value in {
+        EvaluatorType.LLM_RUBRIC.value,
+        EvaluatorType.PAIRWISE.value,
+    }
+    judge = {
+        "applicable": judge_applicable,
+        **(judge_fields if judge_applicable else {key: None for key in judge_fields}),
+    }
+    payload: dict[str, object] = {
+        "id": evaluator_id,
+        "type": evaluator_type_value,
+        "version": evaluator_version,
+        "revision": evaluator_revision,
+        "preflight_details": [],
+        "preflight_detail_count": len(details),
+        "judge": judge,
+    }
     return payload
+
+
+def _revision_status(revision: object) -> str:
+    return "available" if revision is not None else "unavailable"
+
+
+def _repository_record(provenance: RepositoryProvenance) -> dict[str, object]:
+    return {
+        "commit": provenance.commit,
+        "revision_status": provenance.revision_status,
+        "worktree_status": provenance.worktree_status,
+    }
+
+
+def _configuration_intervention(descriptor: Mapping[str, object]) -> dict[str, object]:
+    """Select intervention evidence that is stable and independent of source paths/status."""
+
+    return {
+        key: descriptor.get(key)
+        for key in (
+            "id",
+            "type",
+            "revision",
+            "source_revision",
+            "revision_status",
+            "bundle_sha256",
+            "manifest_sha256",
+            "files",
+            "application",
+        )
+    }
+
+
+def _configuration_evaluator(descriptor: Mapping[str, object]) -> dict[str, object]:
+    """Select evaluator evidence without arbitrary preflight detail payloads."""
+
+    return {
+        key: descriptor.get(key)
+        for key in ("id", "type", "version", "revision", "judge")
+    }
 
 
 def _intervention_metadata(
@@ -379,6 +423,7 @@ class RunSummary:
     task_count: int
     metrics: Mapping[str, float]
     evaluation_status_counts: Mapping[str, int]
+    application_run_ids: Mapping[str, str] = field(default_factory=dict)
 
 
 def run_benchmark(
@@ -436,9 +481,29 @@ def run_benchmark(
     executor_preflight = executor.preflight()
     if not executor_preflight.ok:
         raise _preflight_failure(executor.name, executor_preflight.details)
+    if executor_preflight.executor != executor.name:
+        raise ValueError("executor preflight returned a mismatched executor")
 
     benchmark.prepare()
     tasks = list(benchmark.load_tasks(limit))
+    seen_task_ids: set[str] = set()
+    safe_task_ids: dict[str, str] = {}
+    for task in tasks:
+        task_id = task.execution.task_id
+        if task_id in seen_task_ids:
+            raise ValueError(f"duplicate task_id loaded: {task_id!r}")
+        seen_task_ids.add(task_id)
+        safe_id = safe_task_id(task_id)
+        previous_task_id = safe_task_ids.get(safe_id)
+        if previous_task_id is not None:
+            raise ValueError(
+                f"task ids {previous_task_id!r} and {task_id!r} collide after safe normalization"
+            )
+        safe_task_ids[safe_id] = task_id
+    task_hashes = {
+        task.execution.task_id: task_sha256(task.execution)
+        for task in tasks
+    }
     # Validate every task plan before creating the run directory or allowing
     # any executor to consume a model call.  An evaluator such as the explicit
     # pairwise adapter can reject the generic runner's one-candidate plan, and
@@ -460,6 +525,9 @@ def run_benchmark(
         evaluator.validate_plan(plan)
         intervention.validate_task(task.execution)
         plans.append(plan)
+    repository_info = _repository_record(
+        repository_provenance(Path(__file__).resolve().parents[1])
+    )
     out_dir.mkdir(parents=True, exist_ok=False)
     if runtime_root is not None:
         effective_runtime_root.mkdir(parents=True, exist_ok=False)
@@ -469,10 +537,48 @@ def run_benchmark(
     network_policy = "enabled" if bool(getattr(executor, "network_enabled", False)) else "disabled"
     evaluator_info = _evaluator_metadata(evaluator, evaluator_preflight)
     intervention_info = _intervention_metadata(intervention, intervention_preflight)
+    benchmark_revision = getattr(benchmark, "revision", None)
+    benchmark_revision_status = _revision_status(benchmark_revision)
+    executor_descriptor: dict[str, object] = {
+        "id": executor.name,
+        "version": executor_preflight.version,
+        "invocation_mode": getattr(executor, "invocation_mode", None),
+        "auth_mode": executor_preflight.auth_mode,
+        "model": model,
+        "network_policy": network_policy,
+    }
+    ordered_task_records = [
+        {"task_id": task.execution.task_id, "task_sha256": task_hashes[task.execution.task_id]}
+        for task in tasks
+    ]
+    configuration: dict[str, object] = {
+        "benchmark": {
+            "id": benchmark.name,
+            "revision": benchmark_revision,
+            "revision_status": benchmark_revision_status,
+        },
+        "executor": executor_descriptor,
+        "evaluator": _configuration_evaluator(evaluator_info),
+        "intervention": _configuration_intervention(intervention_info),
+        "model": model,
+        "network_policy": network_policy,
+        "limit": limit,
+        "timeout_seconds": timeout_seconds,
+        "runtime_layout": runtime_layout,
+    }
+    configuration_sha256 = canonical_json_sha256(configuration)
+    run_fingerprint_sha256 = canonical_json_sha256(
+        {
+            "configuration_sha256": configuration_sha256,
+            "repository": repository_info,
+            "tasks": ordered_task_records,
+        }
+    )
     base_metadata: dict[str, object] = {
-        "schema_version": 3,
+        "schema_version": 4,
         "benchmark": benchmark.name,
-        "benchmark_revision": getattr(benchmark, "revision", None),
+        "benchmark_revision": benchmark_revision,
+        "benchmark_revision_status": benchmark_revision_status,
         "evaluator_id": evaluator_info["id"],
         "evaluator_type": evaluator_info["type"],
         "evaluator_version": evaluator_info["version"],
@@ -485,19 +591,37 @@ def run_benchmark(
         "executor": executor.name,
         "executor_version": executor_preflight.version,
         "auth_mode": executor_preflight.auth_mode,
+        "executor_descriptor": executor_descriptor,
         "model": model,
         "network_policy": network_policy,
         "limit": limit,
+        "timeout_seconds": timeout_seconds,
         "runtime_root": str(effective_runtime_root),
         "runtime_layout": runtime_layout,
         "started_at": started_at,
+        "finished_at": None,
         "status": "running",
+        "judge": evaluator_info["judge"],
+        "repository": repository_info,
+        "tasks": ordered_task_records,
+        "configuration": configuration,
+        "configuration_sha256": configuration_sha256,
+        "run_fingerprint_sha256": run_fingerprint_sha256,
     }
-    if "judge" in evaluator_info:
-        base_metadata["judge"] = evaluator_info["judge"]
     _write_json(metadata_path, base_metadata)
 
     rows: list[dict[str, object]] = []
+    application_run_ids: dict[str, str] = {}
+
+    def record_application_run_id(row: Mapping[str, object]) -> None:
+        task_id = row.get("task_id")
+        intervention_payload = row.get("intervention")
+        if not isinstance(task_id, str) or not isinstance(intervention_payload, Mapping):
+            return
+        application_run_id = intervention_payload.get("application_run_id")
+        if isinstance(application_run_id, str) and application_run_id:
+            application_run_ids[task_id] = application_run_id
+
     run_status = "completed"
     try:
         with results_path.open("x", encoding="utf-8", newline="\n") as results_handle:
@@ -556,6 +680,7 @@ def run_benchmark(
                     )
                     row = {
                         "task_id": task.execution.task_id,
+                        "task_sha256": task_hashes[task.execution.task_id],
                         "materialized": materialized,
                         "intervention": intervention_payload,
                         "execution": None,
@@ -564,6 +689,7 @@ def run_benchmark(
                     _write_json(layout.executor_dir.parent / "result.json", row)
                     _append_jsonl(results_handle, row)
                     rows.append(row)
+                    record_application_run_id(row)
                     base_metadata["failure"] = {
                         "phase": "intervention_apply",
                         "exception_type": type(exc).__name__,
@@ -580,6 +706,7 @@ def run_benchmark(
                     )
                     row = {
                         "task_id": task.execution.task_id,
+                        "task_sha256": task_hashes[task.execution.task_id],
                         "materialized": materialized,
                         "intervention": intervention_payload,
                         "execution": None,
@@ -588,6 +715,7 @@ def run_benchmark(
                     _write_json(layout.executor_dir.parent / "result.json", row)
                     _append_jsonl(results_handle, row)
                     rows.append(row)
+                    record_application_run_id(row)
                     base_metadata["failure"] = {
                         "phase": "intervention_apply",
                         "exception_type": type(exc).__name__,
@@ -609,6 +737,7 @@ def run_benchmark(
                 def persist_row(evaluation_payload: dict[str, object]) -> dict[str, object]:
                     row = {
                         "task_id": task.execution.task_id,
+                        "task_sha256": task_hashes[task.execution.task_id],
                         "materialized": materialized,
                         "intervention": intervention_payload,
                         "execution": _execution_payload(result),
@@ -617,11 +746,32 @@ def run_benchmark(
                     _write_json(layout.executor_dir.parent / "result.json", row)
                     _append_jsonl(results_handle, row)
                     rows.append(row)
+                    record_application_run_id(row)
                     return row
 
                 try:
                     if result.task_id != task.execution.task_id:
                         raise ValueError("executor returned a mismatched task_id")
+                    if result.executor != executor.name:
+                        raise ValueError("executor returned a mismatched executor")
+                    expected_invocation_mode = getattr(executor, "invocation_mode", None)
+                    if (
+                        expected_invocation_mode is not None
+                        and result.invocation_mode != expected_invocation_mode
+                    ):
+                        raise ValueError("executor returned a mismatched invocation_mode")
+                    if (
+                        executor_preflight.version is not None
+                        and result.executor_version is not None
+                        and result.executor_version != executor_preflight.version
+                    ):
+                        raise ValueError("executor returned a mismatched executor_version")
+                    if (
+                        executor_preflight.auth_mode is not None
+                        and result.auth_mode is not None
+                        and result.auth_mode != executor_preflight.auth_mode
+                    ):
+                        raise ValueError("executor returned a mismatched auth_mode")
                     if not _path_matches(result.workspace, layout.workspace):
                         raise ValueError("executor returned a workspace outside the assigned task workspace")
                     if not _path_matches(result.deliverables_dir, layout.workspace_deliverables):
@@ -694,6 +844,7 @@ def run_benchmark(
         task_count=len(rows),
         metrics=metrics,
         evaluation_status_counts=_evaluation_status_counts(rows),
+        application_run_ids=dict(application_run_ids),
     )
 
 

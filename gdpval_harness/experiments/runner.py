@@ -44,6 +44,12 @@ from gdpval_harness.experiments.profile import load_experiment_inputs
 from gdpval_harness.interventions.agent_skill import AgentSkillIntervention
 from gdpval_harness.interventions.base import InterventionBundle
 from gdpval_harness.layout import task_layout
+from gdpval_harness.provenance import (
+    canonical_json_sha256,
+    execution_record,
+    repository_provenance,
+    task_sha256,
+)
 from gdpval_harness.runner import RunSummary, run_benchmark
 
 
@@ -409,6 +415,122 @@ def _config_payload(config: ExperimentRunConfig) -> dict[str, object]:
     }
 
 
+def _nullable_text(value: object) -> str | None:
+    if isinstance(value, str) and value.strip():
+        return value
+    return None
+
+
+def _enum_text(value: object) -> str | None:
+    try:
+        value = getattr(value, "value", value)
+    except Exception:
+        return None
+    return _nullable_text(value)
+
+
+def _executor_invocation_mode(executor: Executor) -> str | None:
+    try:
+        value = getattr(executor, "invocation_mode", None)
+    except Exception:
+        return None
+    return _nullable_text(value)
+
+
+def _builder_descriptor(
+    builder: Builder,
+    preflight: BuilderPreflightResult,
+    config: ExperimentRunConfig,
+) -> dict[str, object]:
+    return {
+        "id": _nullable_text(getattr(builder, "name", None)) or _nullable_text(preflight.name),
+        "executor": _nullable_text(preflight.builder_executor),
+        "executor_version": _nullable_text(preflight.builder_executor_version),
+        "invocation_mode": _nullable_text(preflight.builder_executor_invocation_mode),
+        "auth_mode": _nullable_text(preflight.builder_executor_auth_mode),
+        "model": config.builder_model,
+        "network_policy": "enabled" if config.builder_network_enabled else "disabled",
+    }
+
+
+def _application_executor_descriptor(
+    executor: Executor,
+    preflight: PreflightResult,
+    config: ExperimentRunConfig,
+) -> dict[str, object]:
+    return {
+        "id": _nullable_text(preflight.executor),
+        "executor": _nullable_text(preflight.executor),
+        "executor_version": _nullable_text(preflight.version),
+        "invocation_mode": _executor_invocation_mode(executor),
+        "auth_mode": _nullable_text(preflight.auth_mode),
+        "model": config.application_model,
+        "network_policy": "enabled" if config.application_network_enabled else "disabled",
+    }
+
+
+def _evaluator_descriptor(preflight: EvaluatorPreflightResult) -> dict[str, object]:
+    evaluator_type = _enum_text(preflight.evaluator_type)
+    judge_applicable = evaluator_type in {"llm-rubric", "pairwise"}
+    return {
+        "id": _nullable_text(preflight.name),
+        "type": evaluator_type,
+        "version": _nullable_text(preflight.version),
+        "revision": _nullable_text(preflight.revision),
+        "judge": {
+            "applicable": judge_applicable,
+            "executor": _nullable_text(preflight.judge_executor) if judge_applicable else None,
+            "version": _nullable_text(preflight.judge_executor_version) if judge_applicable else None,
+            "auth_mode": _nullable_text(preflight.judge_auth_mode) if judge_applicable else None,
+            "model": _nullable_text(preflight.judge_model) if judge_applicable else None,
+        },
+    }
+
+
+def _benchmark_descriptor(benchmark: Benchmark) -> dict[str, object]:
+    revision = _nullable_text(getattr(benchmark, "revision", None))
+    return {
+        "id": _nullable_text(benchmark.name),
+        "revision": revision,
+        "revision_status": "available" if revision is not None else "unavailable",
+    }
+
+
+def _configuration_payload(
+    profile: LoadedExperimentProfile,
+    config: ExperimentRunConfig,
+    benchmark: Benchmark,
+    source_bundles: Mapping[str, BuilderInputBundle],
+    builder: Builder,
+    builder_preflight: BuilderPreflightResult,
+    application_preflight: PreflightResult,
+    evaluator_preflight: EvaluatorPreflightResult,
+    application_executor: Executor,
+) -> dict[str, object]:
+    return {
+        "profile": {"id": profile.profile.profile_id, "sha256": profile.sha256},
+        "benchmark": _benchmark_descriptor(benchmark),
+        "run_config": _config_payload(config),
+        "inputs": [
+            {
+                "input_id": spec.input_id,
+                "input_type": spec.input_type,
+                "manifest": _manifest_payload(source_bundles[spec.input_id].manifest),
+            }
+            for spec in profile.profile.inputs
+        ],
+        "arms": [
+            {"arm_id": arm.arm_id, "builder_inputs": list(arm.builder_inputs)}
+            for arm in profile.profile.arms
+        ],
+        "builder": _builder_descriptor(builder, builder_preflight, config),
+        "application_executor": _application_executor_descriptor(
+            application_executor, application_preflight, config
+        ),
+        "evaluator": _evaluator_descriptor(evaluator_preflight),
+    }
+
+
 def _plan_artifact_dir(path: Path, task: BenchmarkTask, runtime_root: Path) -> Path:
     try:
         return task_layout(path, task.execution.task_id, runtime_root=runtime_root).judge_deliverables
@@ -495,11 +617,12 @@ def _make_schedule(
     return tuple(items)
 
 
-def _schedule_payload(items: Sequence[_ScheduleItem]) -> list[dict[str, object]]:
+def _schedule_payload(items: Sequence[_ScheduleItem], task_hashes: Mapping[str, str]) -> list[dict[str, object]]:
     return [
         {
             "index": item.index,
             "task_id": item.task.execution.task_id,
+            "task_sha256": task_hashes[item.task.execution.task_id],
             "arm_id": item.arm.arm_id,
             "schedule_id": item.schedule_id,
             "output_root": str(item.output_root),
@@ -518,10 +641,16 @@ def _initial_metadata(
     source_bundles: Mapping[str, BuilderInputBundle],
     source_roots: Mapping[str, Path],
     tasks: Sequence[BenchmarkTask],
+    task_records: Sequence[Mapping[str, object]],
+    task_hashes: Mapping[str, str],
     items: Sequence[_ScheduleItem],
     out_root: Path,
     runtime_root: Path,
     started_at: str,
+    configuration: Mapping[str, object],
+    configuration_sha256: str,
+    repository: Mapping[str, object],
+    run_fingerprint_sha256: str,
 ) -> dict[str, object]:
     inputs = []
     for spec in profile.profile.inputs:
@@ -542,6 +671,7 @@ def _initial_metadata(
         {
             "index": item.index,
             "task_id": item.task.execution.task_id,
+            "task_sha256": task_hashes[item.task.execution.task_id],
             "arm_id": item.arm.arm_id,
             "schedule_id": item.schedule_id,
             "build": None,
@@ -550,7 +680,7 @@ def _initial_metadata(
         for item in items
     ]
     return {
-        "schema_version": 1,
+        "schema_version": 2,
         "profile": {
             "id": profile.profile.profile_id,
             "sha256": profile.sha256,
@@ -564,7 +694,8 @@ def _initial_metadata(
         "inputs": inputs,
         "arms": arms,
         "selected_task_ids": [task.execution.task_id for task in tasks],
-        "schedule": _schedule_payload(items),
+        "tasks": list(task_records),
+        "schedule": _schedule_payload(items, task_hashes),
         "roots": {
             "output": str(out_root),
             "applications": str(out_root / "applications"),
@@ -578,6 +709,10 @@ def _initial_metadata(
         "finished_at": None,
         "status": "running",
         "completed_applications": 0,
+        "configuration": dict(configuration),
+        "configuration_sha256": configuration_sha256,
+        "repository": dict(repository),
+        "run_fingerprint_sha256": run_fingerprint_sha256,
     }
 
 
@@ -599,18 +734,72 @@ def _entry(metadata: dict[str, object], index: int) -> dict[str, object]:
     return row
 
 
+def _artifact_payload(bundle: InterventionBundle) -> dict[str, object]:
+    manifest = bundle.manifest
+    return {
+        "id": _nullable_text(manifest.intervention_id),
+        "type": _enum_text(manifest.intervention_type),
+        "source_revision": _nullable_text(manifest.source_revision),
+        "revision_status": _nullable_text(manifest.revision_status),
+        "bundle_sha256": manifest.bundle_sha256,
+        "manifest_sha256": manifest.manifest_sha256,
+        "files": [
+            {"path": item.path, "size": item.size, "sha256": item.sha256}
+            for item in manifest.files
+        ],
+        "application": {
+            "method": _nullable_text(manifest.application.method),
+            "target": _nullable_text(manifest.application.target),
+        },
+    }
+
+
 def _build_payload(result: BuildResult) -> dict[str, object]:
     status = result.status.value if isinstance(result.status, BuildStatus) else str(result.status)
     phase = None if result.failure_phase is None else result.failure_phase.value
-    return {"status": status, "phase": phase}
+    return {
+        "build_run_id": result.build_run_id,
+        "task_id": result.task_id,
+        "builder": result.builder,
+        "status": status,
+        "phase": phase,
+        "executor_invoked": result.executor_invoked,
+        "inputs": [_manifest_payload(manifest) for manifest in result.inputs],
+        "execution": execution_record(result.execution) if result.execution is not None else None,
+        "artifact": _artifact_payload(result.bundle) if result.bundle is not None else None,
+    }
 
 
-def _application_payload(item: _ScheduleItem, status: str) -> dict[str, object]:
+def _application_payload(
+    item: _ScheduleItem,
+    status: str,
+    application_run_id: str | None = None,
+) -> dict[str, object]:
+    application_run_id = _nullable_text(application_run_id)
     return {
         "output_root": str(item.output_root),
         "runtime_root": str(item.application_root),
+        "run_metadata_path": str(item.output_root / "run-metadata.json"),
+        "results_path": str(item.output_root / "results.jsonl"),
+        "application_run_id": application_run_id,
+        "application_run_id_status": "available" if application_run_id is not None else "unavailable",
         "status": status,
     }
+
+
+def _application_run_id(summary: RunSummary, item: _ScheduleItem) -> str:
+    run_ids = getattr(summary, "application_run_ids", None)
+    if not isinstance(run_ids, Mapping):
+        raise TypeError("application run summary must contain application_run_ids")
+    task_id = item.task.execution.task_id
+    if set(run_ids) != {task_id}:
+        raise ValueError("application run summary returned mismatched application_run_ids")
+    value = run_ids.get(task_id)
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError("application run summary returned an empty application_run_id")
+    if value == item.schedule_id:
+        raise ValueError("application_run_id must differ from schedule_id")
+    return value
 
 
 def _validate_build_result(result: object, request: BuildRequest, builder: Builder) -> BuildResult:
@@ -692,7 +881,7 @@ def run_builder_experiment(
         )
     _validate_path_namespace(out_root, runtime_root, profile_source, preliminary_sources)
 
-    _validate_profile_and_components(
+    evaluator_preflight, application_preflight, builder_preflight = _validate_profile_and_components(
         profile,
         run_config,
         benchmark,
@@ -728,6 +917,37 @@ def run_builder_experiment(
             )
         )
 
+    task_records = [
+        {"task_id": task.execution.task_id, "task_sha256": task_sha256(task.execution)}
+        for task in tasks
+    ]
+    task_hashes = {str(record["task_id"]): str(record["task_sha256"]) for record in task_records}
+    configuration = _configuration_payload(
+        profile,
+        run_config,
+        benchmark,
+        input_bundles,
+        builder,
+        builder_preflight,
+        application_preflight,
+        evaluator_preflight,
+        application_executor,
+    )
+    configuration_sha256 = canonical_json_sha256(configuration)
+    observed_repository = repository_provenance(Path(__file__).resolve().parents[2])
+    repository = {
+        "commit": observed_repository.commit,
+        "revision_status": observed_repository.revision_status,
+        "worktree_status": observed_repository.worktree_status,
+    }
+    run_fingerprint_sha256 = canonical_json_sha256(
+        {
+            "configuration_sha256": configuration_sha256,
+            "repository": repository,
+            "tasks": task_records,
+        }
+    )
+
     metadata_path = out_root / "experiment-metadata.json"
     started_at = _now()
     metadata = _initial_metadata(
@@ -737,10 +957,16 @@ def run_builder_experiment(
         input_bundles,
         canonical_sources,
         tasks,
+        task_records,
+        task_hashes,
         schedule,
         out_root,
         runtime_root,
         started_at,
+        configuration,
+        configuration_sha256,
+        repository,
+        run_fingerprint_sha256,
     )
 
     # No harness-created directory or metadata exists before this point.
@@ -796,6 +1022,7 @@ def run_builder_experiment(
 
             assert build_result.bundle is not None
             selected_benchmark = _SelectedTaskBenchmark(benchmark, item.task)
+            application_run_id: str | None = None
             try:
                 intervention = AgentSkillIntervention(build_result.bundle)
                 if intervention.source_reference is not None:
@@ -822,6 +1049,7 @@ def run_builder_experiment(
                     or application_summary.task_count != 1
                 ):
                     raise ValueError("application runner returned mismatched run identity")
+                application_run_id = _application_run_id(application_summary, item)
             except KeyboardInterrupt:
                 row["application"] = _application_payload(item, "interrupted")
                 _persist_metadata(metadata_path, metadata, status="interrupted", completed=completed, finished=True)
@@ -834,10 +1062,10 @@ def run_builder_experiment(
             application_status = application_summary.status
             if application_status != "completed":
                 if application_status not in {"failed", "interrupted"}:
-                    row["application"] = _application_payload(item, "failed")
+                    row["application"] = _application_payload(item, "failed", application_run_id)
                     _persist_metadata(metadata_path, metadata, status="failed", completed=completed, finished=True)
                     raise ValueError("application runner returned an invalid run status")
-                row["application"] = _application_payload(item, application_status)
+                row["application"] = _application_payload(item, application_status, application_run_id)
                 _persist_metadata(
                     metadata_path,
                     metadata,
@@ -856,7 +1084,7 @@ def run_builder_experiment(
                     completed,
                 )
 
-            row["application"] = _application_payload(item, "completed")
+            row["application"] = _application_payload(item, "completed", application_run_id)
             completed += 1
             _persist_metadata(metadata_path, metadata, status="running", completed=completed, finished=False)
     except KeyboardInterrupt:

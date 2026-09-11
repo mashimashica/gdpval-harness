@@ -117,8 +117,11 @@ class BuilderContractTests(unittest.TestCase):
                 "builder_executor_version",
                 "builder_executor_auth_mode",
                 "details",
+                "builder_executor_invocation_mode",
             ),
         )
+        for forbidden in ("execution", "output_text", "metadata", "credentials", "session", "resume"):
+            self.assertNotIn(forbidden, BuilderPreflightResult.__dataclass_fields__)
         self.assertEqual(
             tuple(BuildResult.__dataclass_fields__),
             ("build_run_id", "task_id", "builder", "status", "inputs", "execution", "bundle", "failure_phase"),
@@ -227,12 +230,25 @@ class BuilderContractTests(unittest.TestCase):
             )
 
     def test_preflight_requires_name_and_freezes_string_details(self) -> None:
-        result = BuilderPreflightResult("builder", True, details=["ready", 3])
+        result = BuilderPreflightResult(
+            "builder",
+            True,
+            details=["ready", 3],
+            builder_executor_invocation_mode="subscription",
+        )
         self.assertEqual(result.details, ("ready", "3"))
+        self.assertEqual(result.builder_executor_invocation_mode, "subscription")
         with self.assertRaises(ValueError):
             BuilderPreflightResult("", False)
         with self.assertRaises(ValueError):
             BuilderPreflightResult(" ", False)
+        for invocation_mode in ("", " ", 42):
+            with self.subTest(invocation_mode=invocation_mode), self.assertRaises(ValueError):
+                BuilderPreflightResult(
+                    "builder",
+                    True,
+                    builder_executor_invocation_mode=invocation_mode,  # type: ignore[arg-type]
+                )
 
     def test_build_result_success_and_failure_invariants(self) -> None:
         manifest = self.manifest()

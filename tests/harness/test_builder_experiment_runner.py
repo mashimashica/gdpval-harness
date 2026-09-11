@@ -45,6 +45,7 @@ from gdpval_harness.experiments.base import (
 from gdpval_harness.experiments.runner import _make_schedule, _validate_build_result, run_builder_experiment
 from gdpval_harness.interventions.agent_skill import load_agent_skill_bundle
 from gdpval_harness.interventions.base import InterventionBundle
+from gdpval_harness.provenance import canonical_json_sha256
 
 
 class _Benchmark(Benchmark):
@@ -99,7 +100,12 @@ class _Evaluator(Evaluator):
 
     def preflight(self, run_dir: Path | None = None) -> EvaluatorPreflightResult:
         del run_dir
-        return EvaluatorPreflightResult(self.name, self.evaluator_type, True)
+        return EvaluatorPreflightResult(
+            self.name,
+            self.evaluator_type,
+            True,
+            details=("EVALUATOR-PREFLIGHT-DETAIL-SENTINEL",),
+        )
 
     def evaluate(self, request: EvaluationRequest) -> EvaluationResult:
         self.evaluate_calls += 1
@@ -110,17 +116,31 @@ class _ApplicationExecutor(Executor):
     name = "generic-application"
     invocation_mode = "fake"
 
-    def __init__(self, *, fail_on_call: int | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        fail_on_call: int | None = None,
+        interrupt_on_call: int | None = None,
+    ) -> None:
         self.fail_on_call = fail_on_call
+        self.interrupt_on_call = interrupt_on_call
         self.preflight_calls = 0
         self.requests: list[ExecutionRequest] = []
 
     def preflight(self) -> PreflightResult:
         self.preflight_calls += 1
-        return PreflightResult(self.name, True, version="application-1", auth_mode="test")
+        return PreflightResult(
+            self.name,
+            True,
+            version="application-1",
+            auth_mode="test",
+            details=("APPLICATION-PREFLIGHT-DETAIL-SENTINEL",),
+        )
 
     def execute(self, request: ExecutionRequest) -> ExecutionResult:
         self.requests.append(request)
+        if self.interrupt_on_call == len(self.requests):
+            raise KeyboardInterrupt
         request.workspace.mkdir(parents=True, exist_ok=True)
         request.executor_dir.mkdir(parents=True, exist_ok=True)
         request.deliverables_dir.mkdir(parents=True, exist_ok=True)
@@ -153,7 +173,13 @@ class _Builder(Builder):
 
     def preflight(self) -> BuilderPreflightResult:
         self.preflight_calls += 1
-        return BuilderPreflightResult(self.name, True, builder_executor="generic-builder-executor")
+        return BuilderPreflightResult(
+            self.name,
+            True,
+            builder_executor="generic-builder-executor",
+            details=("BUILDER-PREFLIGHT-DETAIL-SENTINEL",),
+            builder_executor_invocation_mode="builder-fake",
+        )
 
     def build(self, request: BuildRequest) -> BuildResult:
         self.requests.append(request)
@@ -211,10 +237,18 @@ class _Builder(Builder):
 
 
 class BuilderExperimentRunnerTests(unittest.TestCase):
-    def _fixture(self, root: Path, *, task_count: int = 2, fail_plan_at: int | None = None):
+    def _fixture(
+        self,
+        root: Path,
+        *,
+        task_count: int = 2,
+        fail_plan_at: int | None = None,
+        input_content: str = "allowlisted input",
+        order_seed: int = 19,
+    ):
         source = root / "input-source"
         source.mkdir()
-        (source / "guide.txt").write_text("allowlisted input", encoding="utf-8")
+        (source / "guide.txt").write_text(input_content, encoding="utf-8")
         source_bundle = load_builder_input_bundle(
             source,
             input_id="input-guide",
@@ -254,7 +288,7 @@ class BuilderExperimentRunnerTests(unittest.TestCase):
             builder_network_enabled=False,
             application_network_enabled=False,
             limit=max(task_count, 1),
-            order_seed=19,
+            order_seed=order_seed,
         )
         benchmark = _Benchmark(task_count)
         evaluator = _Evaluator(fail_plan_at=fail_plan_at)
@@ -262,17 +296,37 @@ class BuilderExperimentRunnerTests(unittest.TestCase):
         application = _ApplicationExecutor()
         return profile, config, benchmark, evaluator, builder, application, source_bundle
 
-    def _run(self, root: Path, **kwargs: object):
+    def _run(
+        self,
+        root: Path,
+        *,
+        schedule_ids: list[str] | None = None,
+        application_ids: list[str] | None = None,
+        task_prompt_suffix: str = "",
+        **kwargs: object,
+    ):
+        root.mkdir(parents=True, exist_ok=True)
         profile, config, benchmark, evaluator, builder, application, source_bundle = self._fixture(root, **kwargs)
+        if task_prompt_suffix:
+            benchmark.tasks = tuple(
+                BenchmarkTask(
+                    TaskSpec(task.execution.task_id, task.execution.prompt + task_prompt_suffix),
+                    materialization=task.materialization,
+                    evaluation=task.evaluation,
+                )
+                for task in benchmark.tasks
+            )
+        schedule_ids = schedule_ids or [f"{index:032x}" for index in range(1, 100)]
+        application_ids = application_ids or [f"application-run-{index}" for index in range(1, 100)]
         with patch(
             "gdpval_harness.experiments.runner.load_experiment_inputs",
             return_value={"input-guide": source_bundle},
         ) as input_loader, patch(
             "gdpval_harness.experiments.runner.secrets.token_hex",
-            side_effect=[f"{index:032x}" for index in range(1, 100)],
+            side_effect=schedule_ids,
         ), patch(
             "gdpval_harness.runner.secrets.token_urlsafe",
-            side_effect=[f"application-run-{index}" for index in range(1, 100)],
+            side_effect=application_ids,
         ):
             summary = run_builder_experiment(
                 profile,
@@ -317,15 +371,86 @@ class BuilderExperimentRunnerTests(unittest.TestCase):
             self.assertTrue(all("private" not in json.dumps(request.environment) for request in application.requests))
 
             metadata = json.loads((root / "output" / "experiment-metadata.json").read_text(encoding="utf-8"))
-            self.assertEqual(metadata["schema_version"], 1)
+            self.assertEqual(metadata["schema_version"], 2)
             self.assertEqual(metadata["status"], "completed")
+            self.assertIsInstance(metadata["started_at"], str)
+            self.assertTrue(metadata["started_at"])
+            self.assertIsInstance(metadata["finished_at"], str)
+            self.assertTrue(metadata["finished_at"])
             self.assertEqual(metadata["completed_applications"], 4)
             self.assertNotIn("private", json.dumps(metadata))
             self.assertEqual(len(metadata["schedule"]), 4)
+            for entry in metadata["entries"]:
+                build = entry["build"]
+                self.assertEqual(build["build_run_id"], entry["schedule_id"])
+                self.assertEqual(build["task_id"], entry["task_id"])
+                self.assertEqual(build["builder"], "generic-builder")
+                self.assertTrue(build["executor_invoked"])
+                self.assertEqual(build["inputs"][0]["input_id"], "input-guide")
+                self.assertEqual(build["inputs"][0]["bundle_sha256"], source_bundle.manifest.bundle_sha256)
+                self.assertEqual(build["inputs"][0]["manifest_sha256"], source_bundle.manifest.manifest_sha256)
+                self.assertEqual(build["execution"]["metadata"], {})
+                self.assertEqual(build["execution"]["started_at"], "2026-09-11T00:00:00+00:00")
+                self.assertEqual(build["execution"]["finished_at"], "2026-09-11T00:00:01+00:00")
+                self.assertNotIn("output_text", build["execution"])
+                self.assertEqual(build["artifact"]["id"], "generic-skill")
+                self.assertEqual(build["artifact"]["type"], "agent-skill")
+                self.assertEqual(build["artifact"]["revision_status"], "unavailable")
+                self.assertEqual(build["artifact"]["source_revision"], None)
+                self.assertEqual(build["artifact"]["application"]["method"], "workspace-reference")
+                self.assertTrue(any(item["path"] == "SKILL.md" for item in build["artifact"]["files"]))
+            self.assertEqual(
+                metadata["selected_task_ids"],
+                [task.execution.task_id for task in benchmark.tasks],
+            )
+            self.assertEqual(
+                [record["task_id"] for record in metadata["tasks"]],
+                metadata["selected_task_ids"],
+            )
+            self.assertEqual(
+                set(metadata["configuration"]),
+                {
+                    "profile",
+                    "benchmark",
+                    "run_config",
+                    "inputs",
+                    "arms",
+                    "builder",
+                    "application_executor",
+                    "evaluator",
+                },
+            )
+            self.assertNotIn("source", metadata["configuration"]["profile"])
+            self.assertNotIn("source_root", json.dumps(metadata["configuration"]))
+            self.assertEqual(metadata["configuration"]["benchmark"]["revision_status"], "available")
+            self.assertEqual(metadata["configuration"]["builder"]["id"], "generic-builder")
+            self.assertEqual(metadata["configuration"]["builder"]["executor"], "generic-builder-executor")
+            self.assertEqual(metadata["configuration"]["builder"]["invocation_mode"], "builder-fake")
+            self.assertEqual(metadata["configuration"]["builder"]["auth_mode"], None)
+            self.assertEqual(metadata["configuration"]["application_executor"]["id"], "generic-application")
+            self.assertEqual(metadata["configuration"]["application_executor"]["invocation_mode"], "fake")
+            self.assertEqual(metadata["configuration"]["evaluator"]["id"], "generic-evaluator")
+            self.assertEqual(metadata["configuration"]["evaluator"]["judge"]["applicable"], False)
+            self.assertEqual(metadata["configuration"]["evaluator"]["judge"]["executor"], None)
+            self.assertEqual(
+                metadata["configuration_sha256"],
+                canonical_json_sha256(metadata["configuration"]),
+            )
+            self.assertEqual(
+                metadata["run_fingerprint_sha256"],
+                canonical_json_sha256(
+                    {
+                        "configuration_sha256": metadata["configuration_sha256"],
+                        "repository": metadata["repository"],
+                        "tasks": metadata["tasks"],
+                    }
+                ),
+            )
             self.assertTrue(all(entry["application"]["status"] == "completed" for entry in metadata["entries"]))
             ids = [entry["schedule_id"] for entry in metadata["schedule"]]
             self.assertEqual(len(ids), len(set(ids)))
             for entry in metadata["schedule"]:
+                self.assertEqual(len(entry["task_sha256"]), 64)
                 self.assertIn("output/applications/", entry["output_root"])
                 self.assertIn("runtime/", entry["application_root"])
                 self.assertNotIn("arm-first", json.dumps(entry["output_root"]))
@@ -336,7 +461,26 @@ class BuilderExperimentRunnerTests(unittest.TestCase):
                 nested_row = json.loads(
                     (Path(entry["output_root"]) / "results.jsonl").read_text(encoding="utf-8").splitlines()[0]
                 )
-                self.assertNotEqual(entry["schedule_id"], nested_row["intervention"]["application_run_id"])
+                actual_application_run_id = nested_row["intervention"]["application_run_id"]
+                self.assertNotEqual(entry["schedule_id"], actual_application_run_id)
+                matching_entry = next(
+                    candidate
+                    for candidate in metadata["entries"]
+                    if candidate["schedule_id"] == entry["schedule_id"]
+                )
+                self.assertEqual(matching_entry["task_sha256"], entry["task_sha256"])
+                self.assertEqual(
+                    matching_entry["application"]["application_run_id"], actual_application_run_id
+                )
+                self.assertEqual(matching_entry["application"]["application_run_id_status"], "available")
+                self.assertEqual(
+                    Path(matching_entry["application"]["run_metadata_path"]),
+                    Path(entry["output_root"]) / "run-metadata.json",
+                )
+                self.assertEqual(
+                    Path(matching_entry["application"]["results_path"]),
+                    Path(entry["output_root"]) / "results.jsonl",
+                )
                 self.assertEqual(nested_row["evaluation"]["metrics"]["accuracy"], 1.0)
                 self.assertEqual(nested_metadata["status"], "completed")
 
@@ -354,10 +498,70 @@ class BuilderExperimentRunnerTests(unittest.TestCase):
                     "private rubric sentinel",
                     "session",
                     "resume",
+                    "BUILDER-PREFLIGHT-DETAIL-SENTINEL",
+                    "APPLICATION-PREFLIGHT-DETAIL-SENTINEL",
+                    "EVALUATOR-PREFLIGHT-DETAIL-SENTINEL",
                 ):
                     self.assertNotIn(sentinel, serialized_prompt)
                     self.assertNotIn(sentinel, serialized_environment)
                     self.assertNotIn(sentinel, workspace_contents)
+
+    def test_fingerprint_excludes_paths_time_and_opaque_ids_but_tracks_inputs_tasks_and_config(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            first_root = root / "first"
+            second_root = root / "second"
+            first_root.mkdir()
+            second_root.mkdir()
+            first, *_ = self._run(
+                first_root,
+                schedule_ids=[f"first-{index:028x}" for index in range(4)],
+                application_ids=[f"first-application-{index}" for index in range(4)],
+            )
+            second, *_ = self._run(
+                second_root,
+                schedule_ids=[f"second-{index:027x}" for index in range(4)],
+                application_ids=[f"second-application-{index}" for index in range(4)],
+            )
+            first_metadata = json.loads(
+                (first_root / "output" / "experiment-metadata.json").read_text(encoding="utf-8")
+            )
+            second_metadata = json.loads(
+                (second_root / "output" / "experiment-metadata.json").read_text(encoding="utf-8")
+            )
+            self.assertEqual(first.status, second.status)
+            self.assertEqual(first_metadata["configuration_sha256"], second_metadata["configuration_sha256"])
+            self.assertEqual(first_metadata["run_fingerprint_sha256"], second_metadata["run_fingerprint_sha256"])
+
+            changed_config_root = root / "changed-config"
+            changed_config, *_ = self._run(changed_config_root, order_seed=20)
+            changed_config_metadata = json.loads(
+                (changed_config_root / "output" / "experiment-metadata.json").read_text(encoding="utf-8")
+            )
+            self.assertNotEqual(
+                first_metadata["run_fingerprint_sha256"], changed_config_metadata["run_fingerprint_sha256"]
+            )
+            self.assertNotEqual(
+                first_metadata["configuration_sha256"], changed_config_metadata["configuration_sha256"]
+            )
+
+            changed_task_root = root / "changed-task"
+            changed_task, *_ = self._run(changed_task_root, task_prompt_suffix=" changed")
+            changed_task_metadata = json.loads(
+                (changed_task_root / "output" / "experiment-metadata.json").read_text(encoding="utf-8")
+            )
+            self.assertNotEqual(
+                first_metadata["run_fingerprint_sha256"], changed_task_metadata["run_fingerprint_sha256"]
+            )
+
+            changed_input_root = root / "changed-input"
+            changed_input, *_ = self._run(changed_input_root, input_content="changed input")
+            changed_input_metadata = json.loads(
+                (changed_input_root / "output" / "experiment-metadata.json").read_text(encoding="utf-8")
+            )
+            self.assertNotEqual(
+                first_metadata["run_fingerprint_sha256"], changed_input_metadata["run_fingerprint_sha256"]
+            )
 
     def test_plan_failure_happens_before_builder_or_root_creation(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -576,7 +780,44 @@ class BuilderExperimentRunnerTests(unittest.TestCase):
             metadata = json.loads((root / "output" / "experiment-metadata.json").read_text(encoding="utf-8"))
             self.assertEqual(metadata["status"], "interrupted")
             self.assertEqual(metadata["entries"][0]["build"]["status"], "interrupted")
+            self.assertIsNone(metadata["entries"][0]["application"])
             self.assertEqual(len(application.requests), 0)
+
+    def test_application_interrupt_records_unavailable_id_and_nested_paths_before_reraise(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            profile, config, benchmark, evaluator, builder, _, source_bundle = self._fixture(root)
+            application = _ApplicationExecutor(interrupt_on_call=1)
+            with patch(
+                "gdpval_harness.experiments.runner.load_experiment_inputs",
+                return_value={"input-guide": source_bundle},
+            ), patch(
+                "gdpval_harness.experiments.runner.secrets.token_hex",
+                side_effect=[f"{index:032x}" for index in range(1, 100)],
+            ), patch(
+                "gdpval_harness.runner.secrets.token_urlsafe",
+                side_effect=[f"application-run-{index}" for index in range(1, 100)],
+            ):
+                with self.assertRaises(KeyboardInterrupt):
+                    run_builder_experiment(
+                        profile,
+                        config,
+                        benchmark,
+                        evaluator,
+                        builder,
+                        application,
+                        source_roots={"input-guide": root / "input-source"},
+                        out_dir=root / "output",
+                        runtime_root=root / "runtime",
+                    )
+            metadata = json.loads((root / "output" / "experiment-metadata.json").read_text(encoding="utf-8"))
+            entry = metadata["entries"][0]["application"]
+            self.assertEqual(metadata["status"], "interrupted")
+            self.assertEqual(entry["status"], "interrupted")
+            self.assertIsNone(entry["application_run_id"])
+            self.assertEqual(entry["application_run_id_status"], "unavailable")
+            self.assertTrue(Path(entry["run_metadata_path"]).is_file())
+            self.assertTrue(Path(entry["results_path"]).is_file())
 
     def test_application_failure_stops_remaining_schedule_and_persists_partial_state(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -613,6 +854,8 @@ class BuilderExperimentRunnerTests(unittest.TestCase):
             self.assertEqual(metadata["completed_applications"], 1)
             self.assertEqual(metadata["entries"][0]["application"]["status"], "completed")
             self.assertEqual(metadata["entries"][1]["application"]["status"], "failed")
+            self.assertEqual(metadata["entries"][1]["application"]["application_run_id_status"], "available")
+            self.assertTrue(metadata["entries"][1]["application"]["application_run_id"])
             self.assertIsNone(metadata["entries"][2]["build"])
             failed_output = Path(metadata["entries"][1]["application"]["output_root"])
             self.assertEqual(

@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import tempfile
@@ -10,6 +11,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+import gdpval_harness.runner as runner_module
 from gdpval_harness.benchmarks.base import Benchmark, BenchmarkTask
 from gdpval_harness.evaluators.base import (
     EvaluationPlan,
@@ -44,6 +46,7 @@ from gdpval_harness.interventions.base import (
 from gdpval_harness.judges.base import JudgeExecutor, JudgePreflightResult, JudgeRequest, JudgeResult
 from gdpval_harness.judges.pairwise import discover_tasks
 from gdpval_harness.local_judge_runner import _candidate_task_prompt
+from gdpval_harness.provenance import RepositoryProvenance, canonical_json_sha256
 from gdpval_harness.runner import run_benchmark
 
 
@@ -57,10 +60,12 @@ class FakeBenchmark(Benchmark):
         *,
         events: list[str] | None = None,
         evaluation_metadata: dict[str, object] | None = None,
+        prompt_prefix: str = "",
     ) -> None:
         self.task_count = task_count
         self.events = events if events is not None else []
         self.evaluation_metadata = evaluation_metadata or {}
+        self.prompt_prefix = prompt_prefix
 
     def is_prepared(self) -> bool:
         return True
@@ -72,7 +77,7 @@ class FakeBenchmark(Benchmark):
     def load_tasks(self, limit: int) -> list[BenchmarkTask]:
         return [
             BenchmarkTask(
-                execution=TaskSpec(task_id=f"task-{index}", prompt=f"prompt-{index}"),
+                execution=TaskSpec(task_id=f"task-{index}", prompt=f"{self.prompt_prefix}prompt-{index}"),
                 evaluation=dict(self.evaluation_metadata),
             )
             for index in range(min(limit, self.task_count))
@@ -181,6 +186,8 @@ class FakeEvaluator(Evaluator):
         statuses: tuple[EvaluationStatus, ...] | None = None,
         invalid_plan_task_id: str | None = None,
         events: list[str] | None = None,
+        preflight_details: tuple[str, ...] = (),
+        judge_fields: dict[str, str | None] | None = None,
     ) -> None:
         self.fail = fail
         self.statuses = statuses or (EvaluationStatus.COMPLETED,)
@@ -188,12 +195,21 @@ class FakeEvaluator(Evaluator):
         self.events = events if events is not None else []
         self.calls = 0
         self.preflight_calls = 0
+        self.preflight_details = preflight_details
+        self.judge_fields = dict(judge_fields or {})
 
     def preflight(self, run_dir: Path | None = None) -> EvaluatorPreflightResult:
         del run_dir
         self.events.append("evaluator-preflight")
         self.preflight_calls += 1
-        return EvaluatorPreflightResult(self.name, self.evaluator_type, True, version="fake-eval-1")
+        return EvaluatorPreflightResult(
+            self.name,
+            self.evaluator_type,
+            True,
+            version="fake-eval-1",
+            details=self.preflight_details,
+            **self.judge_fields,
+        )
 
     def validate_plan(self, plan: EvaluationPlan) -> None:
         if plan.task_id == self.invalid_plan_task_id:
@@ -223,6 +239,12 @@ class FakeExecutor(Executor):
         fail_on_call: int | None = None,
         outside_deliverables: bool = False,
         events: list[str] | None = None,
+        result_executor: str | None = None,
+        result_invocation_mode: str | None = None,
+        result_version: str | None = "fake-1",
+        result_auth_mode: str | None = "fake-local",
+        result_metadata: dict[str, object] | None = None,
+        result_output_text: str | None = "answer",
     ) -> None:
         self.calls = 0
         self.fail_on_call = fail_on_call
@@ -231,6 +253,12 @@ class FakeExecutor(Executor):
         self.tasks: list[TaskSpec] = []
         self.environments: list[dict[str, str]] = []
         self.preflight_calls = 0
+        self.result_executor = result_executor
+        self.result_invocation_mode = result_invocation_mode
+        self.result_version = result_version
+        self.result_auth_mode = result_auth_mode
+        self.result_metadata = result_metadata if result_metadata is not None else {"fake": True}
+        self.result_output_text = result_output_text
 
     def preflight(self) -> PreflightResult:
         self.events.append("executor-preflight")
@@ -257,18 +285,18 @@ class FakeExecutor(Executor):
             deliverables_dir.mkdir(parents=True, exist_ok=True)
         return ExecutionResult(
             task_id=request.task.task_id,
-            executor=self.name,
-            executor_version="fake-1",
-            invocation_mode=self.invocation_mode,
-            auth_mode="fake-local",
+            executor=self.result_executor or self.name,
+            executor_version=self.result_version,
+            invocation_mode=self.result_invocation_mode or self.invocation_mode,
+            auth_mode=self.result_auth_mode,
             workspace=request.workspace,
             deliverables_dir=deliverables_dir,
             status=status,
             started_at="2026-09-11T00:00:00+00:00",
             finished_at="2026-09-11T00:00:01+00:00",
             exit_code=1 if failed else 0,
-            output_text="answer",
-            metadata={"fake": True},
+            output_text=self.result_output_text,
+            metadata=self.result_metadata,
         )
 
 
@@ -600,10 +628,15 @@ class GenericRunnerTests(unittest.TestCase):
             self.assertEqual(summary.task_count, 2)
             self.assertEqual(summary.metrics, {"accuracy": 1.0})
             self.assertEqual(summary.evaluation_status_counts, {"completed": 2})
+            self.assertEqual(set(summary.application_run_ids), {"task-0", "task-1"})
             self.assertEqual(evaluator.preflight_calls, 1)
             self.assertEqual(evaluator.calls, 2)
             rows = [json.loads(line) for line in (out / "results.jsonl").read_text(encoding="utf-8").splitlines()]
             self.assertEqual(len(rows), 2)
+            self.assertEqual(
+                summary.application_run_ids,
+                {row["task_id"]: row["intervention"]["application_run_id"] for row in rows},
+            )
             self.assertEqual(rows[0]["materialized"], ["input.txt"])
             self.assertEqual(rows[0]["evaluation"]["metrics"], {"accuracy": 1.0})
             self.assertEqual(rows[0]["evaluation"]["status"], "completed")
@@ -646,7 +679,7 @@ class GenericRunnerTests(unittest.TestCase):
             self.assertTrue((out / "deliverables" / "task_task-0" / "repeat_0").is_dir())
 
             metadata = json.loads((out / "run-metadata.json").read_text(encoding="utf-8"))
-            self.assertEqual(metadata["schema_version"], 3)
+            self.assertEqual(metadata["schema_version"], 4)
             self.assertEqual(metadata["runtime_root"], str(runtime.resolve()))
             self.assertEqual(metadata["runtime_layout"], "external-persistent")
 
@@ -692,7 +725,7 @@ class GenericRunnerTests(unittest.TestCase):
 
             self.assertEqual(summary.runtime_root, out.resolve())
             metadata = json.loads((out / "run-metadata.json").read_text(encoding="utf-8"))
-            self.assertEqual(metadata["schema_version"], 3)
+            self.assertEqual(metadata["schema_version"], 4)
             self.assertEqual(metadata["runtime_root"], str(out.resolve()))
             self.assertEqual(metadata["runtime_layout"], "run-output")
 
@@ -1033,6 +1066,303 @@ class GenericRunnerTests(unittest.TestCase):
             self.assertEqual(json.loads(rows[0])["execution"]["status"], "failed")
             metadata = json.loads((out / "run-metadata.json").read_text(encoding="utf-8"))
             self.assertEqual(metadata["status"], "failed")
+
+    def test_reproducibility_metadata_is_typed_and_secret_safe(self) -> None:
+        repository = RepositoryProvenance("a" * 40, "available", "clean")
+        evaluator = FakeEvaluator(
+            preflight_details=("preflight-secret",),
+            judge_fields={
+                "judge_executor": "judge-executor",
+                "judge_executor_version": "judge-version",
+                "judge_auth_mode": "judge-auth",
+                "judge_model": "judge-model",
+            },
+        )
+        evaluator.evaluator_type = EvaluatorType.LLM_RUBRIC
+        executor = FakeExecutor(
+            result_metadata={
+                "credential": "credential-secret",
+                "command": "command-secret",
+                "environment": "environment-secret",
+            },
+            result_output_text="output-secret",
+        )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            out = root / "run"
+            with (
+                patch.object(runner_module, "repository_provenance", return_value=repository),
+                patch.dict(os.environ, {"HARNESS_CREDENTIAL_SECRET": "environment-secret"}),
+            ):
+                summary = run_benchmark(
+                    FakeBenchmark(task_count=1),
+                    evaluator,
+                    executor,
+                    out_dir=out,
+                    limit=1,
+                    model="model-name",
+                )
+
+            metadata = json.loads((out / "run-metadata.json").read_text(encoding="utf-8"))
+            row = json.loads((out / "results.jsonl").read_text(encoding="utf-8"))
+            execution = row["execution"]
+            self.assertEqual(summary.status, "completed")
+            self.assertTrue((out / "tasks" / "task-0" / "executor" / "stdout.log").is_file())
+            self.assertTrue((out / "tasks" / "task-0" / "result.json").is_file())
+            self.assertEqual(metadata["schema_version"], 4)
+            self.assertIsInstance(metadata["finished_at"], str)
+            self.assertTrue(metadata["finished_at"])
+            self.assertEqual(metadata["repository"], {
+                "commit": "a" * 40,
+                "revision_status": "available",
+                "worktree_status": "clean",
+            })
+            self.assertEqual(metadata["benchmark_revision_status"], "available")
+            self.assertEqual(metadata["evaluator"]["preflight_details"], [])
+            self.assertEqual(metadata["evaluator"]["preflight_detail_count"], 1)
+            self.assertEqual(metadata["evaluator"]["judge"], {
+                "applicable": True,
+                "executor": "judge-executor",
+                "version": "judge-version",
+                "auth_mode": "judge-auth",
+                "model": "judge-model",
+            })
+            self.assertEqual(metadata["judge"], metadata["evaluator"]["judge"])
+            self.assertEqual(set(metadata["executor_descriptor"]), {
+                "id", "version", "invocation_mode", "auth_mode", "model", "network_policy"
+            })
+            self.assertEqual(execution["metadata"], {})
+            self.assertNotIn("output_text", execution)
+            self.assertEqual(row["task_sha256"], hashlib.sha256(b"prompt-0").hexdigest())
+            self.assertEqual(summary.application_run_ids, {
+                "task-0": row["intervention"]["application_run_id"]
+            })
+            self.assertEqual(
+                metadata["configuration_sha256"],
+                canonical_json_sha256(metadata["configuration"]),
+            )
+            self.assertEqual(
+                metadata["run_fingerprint_sha256"],
+                canonical_json_sha256({
+                    "configuration_sha256": metadata["configuration_sha256"],
+                    "repository": metadata["repository"],
+                    "tasks": metadata["tasks"],
+                }),
+            )
+            configuration_text = json.dumps(metadata["configuration"], sort_keys=True)
+            self.assertNotIn(str(out), configuration_text)
+            self.assertNotIn("preflight-secret", configuration_text)
+            self.assertNotIn("status", metadata["configuration"]["intervention"])
+            self.assertNotIn("source_reference", metadata["configuration"]["intervention"])
+            serialized = json.dumps({"metadata": metadata, "row": row})
+            for secret in (
+                "preflight-secret",
+                "credential-secret",
+                "command-secret",
+                "environment-secret",
+                "output-secret",
+            ):
+                self.assertNotIn(secret, serialized)
+
+    def test_judge_nonapplicability_and_unavailable_benchmark_revision_are_explicit(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp) / "run"
+            benchmark = FakeBenchmark(task_count=1)
+            benchmark.revision = None
+            run_benchmark(
+                benchmark,
+                FakeEvaluator(judge_fields={"judge_executor": "ignored-non-judge"}),
+                FakeExecutor(),
+                out_dir=out,
+                limit=1,
+            )
+
+            metadata = json.loads((out / "run-metadata.json").read_text(encoding="utf-8"))
+            self.assertEqual(metadata["benchmark_revision_status"], "unavailable")
+            self.assertIsNone(metadata["benchmark_revision"])
+            self.assertEqual(metadata["configuration"]["benchmark"]["revision_status"], "unavailable")
+            self.assertEqual(metadata["judge"], {
+                "applicable": False,
+                "executor": None,
+                "version": None,
+                "auth_mode": None,
+                "model": None,
+            })
+
+    def test_judge_applicability_is_typed_even_when_judge_details_are_unavailable(self) -> None:
+        evaluator = FakeEvaluator()
+        evaluator.evaluator_type = EvaluatorType.PAIRWISE
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp) / "run"
+            run_benchmark(FakeBenchmark(task_count=1), evaluator, FakeExecutor(), out_dir=out, limit=1)
+
+            metadata = json.loads((out / "run-metadata.json").read_text(encoding="utf-8"))
+            self.assertEqual(metadata["judge"], {
+                "applicable": True,
+                "executor": None,
+                "version": None,
+                "auth_mode": None,
+                "model": None,
+            })
+
+    def test_duplicate_and_safe_task_id_collisions_fail_before_execution_or_roots(self) -> None:
+        class CollisionBenchmark(FakeBenchmark):
+            def __init__(self, task_ids: tuple[str, ...]) -> None:
+                super().__init__(task_count=len(task_ids))
+                self.task_ids = task_ids
+
+            def load_tasks(self, limit: int) -> list[BenchmarkTask]:
+                del limit
+                return [
+                    BenchmarkTask(TaskSpec(task_id=task_id, prompt=f"prompt-{index}"))
+                    for index, task_id in enumerate(self.task_ids)
+                ]
+
+        cases = (
+            (("duplicate", "duplicate"), "duplicate task_id"),
+            (("a/b", "a?b"), "collide after safe normalization"),
+        )
+        for index, (task_ids, message) in enumerate(cases):
+            with self.subTest(task_ids=task_ids), tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                out = root / "out"
+                runtime = root / "runtime"
+                executor = FakeExecutor()
+                with self.assertRaisesRegex(ValueError, message):
+                    run_benchmark(
+                        CollisionBenchmark(task_ids),
+                        FakeEvaluator(),
+                        executor,
+                        out_dir=out,
+                        runtime_root=runtime,
+                        limit=len(task_ids),
+                    )
+                self.assertEqual(executor.calls, 0)
+                self.assertFalse(out.exists())
+                self.assertFalse(runtime.exists())
+
+    def test_reproducibility_hashes_ignore_paths_timestamps_and_random_application_ids(self) -> None:
+        repository = RepositoryProvenance("b" * 40, "available", "dirty")
+
+        def run_once(root: Path, *, model: str | None = None, prompt_prefix: str = "") -> dict[str, object]:
+            with patch.object(runner_module, "repository_provenance", return_value=repository):
+                run_benchmark(
+                    FakeBenchmark(task_count=1, prompt_prefix=prompt_prefix),
+                    FakeEvaluator(),
+                    FakeExecutor(),
+                    out_dir=root / "run",
+                    limit=1,
+                    model=model,
+                )
+            return json.loads((root / "run" / "run-metadata.json").read_text(encoding="utf-8"))
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            first = run_once(root / "first")
+            second = run_once(root / "second")
+            self.assertEqual(first["configuration_sha256"], second["configuration_sha256"])
+            self.assertEqual(first["run_fingerprint_sha256"], second["run_fingerprint_sha256"])
+            self.assertEqual(first["tasks"], second["tasks"])
+
+            changed_config = run_once(root / "config", model="different-model")
+            self.assertNotEqual(first["configuration_sha256"], changed_config["configuration_sha256"])
+            self.assertNotEqual(first["run_fingerprint_sha256"], changed_config["run_fingerprint_sha256"])
+
+            changed_task = run_once(root / "task", prompt_prefix="changed-")
+            self.assertEqual(first["configuration_sha256"], changed_task["configuration_sha256"])
+            self.assertNotEqual(first["run_fingerprint_sha256"], changed_task["run_fingerprint_sha256"])
+            self.assertNotEqual(first["tasks"], changed_task["tasks"])
+
+    def test_repository_unavailable_and_dirty_records_are_safe(self) -> None:
+        cases = (
+            RepositoryProvenance(None, "unavailable", "unavailable"),
+            RepositoryProvenance("c" * 40, "available", "dirty"),
+        )
+        for index, repository in enumerate(cases):
+            with self.subTest(repository=repository), tempfile.TemporaryDirectory() as tmp:
+                out = Path(tmp) / "run"
+                with patch.object(runner_module, "repository_provenance", return_value=repository):
+                    run_benchmark(
+                        FakeBenchmark(task_count=1),
+                        FakeEvaluator(),
+                        FakeExecutor(),
+                        out_dir=out,
+                        limit=1,
+                    )
+                metadata = json.loads((out / "run-metadata.json").read_text(encoding="utf-8"))
+                self.assertEqual(metadata["repository"]["revision_status"], repository.revision_status)
+                self.assertEqual(metadata["repository"]["worktree_status"], repository.worktree_status)
+                self.assertEqual(metadata["repository"]["commit"], repository.commit)
+
+    def test_executor_identity_and_typed_result_mismatches_persist_before_stopping(self) -> None:
+        cases = (
+            ({"result_executor": "tampered-executor"}, "mismatched executor"),
+            ({"result_invocation_mode": "tampered-mode"}, "mismatched invocation_mode"),
+            ({"result_version": "tampered-version"}, "mismatched executor_version"),
+            ({"result_auth_mode": "tampered-auth"}, "mismatched auth_mode"),
+        )
+        for index, (executor_options, message) in enumerate(cases):
+            with self.subTest(message=message), tempfile.TemporaryDirectory() as tmp:
+                out = Path(tmp) / f"run-{index}"
+                evaluator = FakeEvaluator()
+                with self.assertRaisesRegex(ValueError, message):
+                    run_benchmark(
+                        FakeBenchmark(task_count=1),
+                        evaluator,
+                        FakeExecutor(**executor_options),
+                        out_dir=out,
+                        limit=1,
+                    )
+                self.assertEqual(evaluator.calls, 0)
+                row = json.loads((out / "results.jsonl").read_text(encoding="utf-8"))
+                metadata = json.loads((out / "run-metadata.json").read_text(encoding="utf-8"))
+                self.assertEqual(row["evaluation"]["status"], "failed")
+                self.assertEqual(metadata["status"], "failed")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp) / "null-result-fields"
+            summary = run_benchmark(
+                FakeBenchmark(task_count=1),
+                FakeEvaluator(),
+                FakeExecutor(result_version=None, result_auth_mode=None),
+                out_dir=out,
+                limit=1,
+            )
+            self.assertEqual(summary.status, "completed")
+            row = json.loads((out / "results.jsonl").read_text(encoding="utf-8"))
+            self.assertIsNone(row["execution"]["executor_version"])
+            self.assertIsNone(row["execution"]["auth_mode"])
+
+    def test_executor_preflight_identity_mismatch_stops_before_execution_or_roots(self) -> None:
+        class TamperedPreflightExecutor(FakeExecutor):
+            def preflight(self) -> PreflightResult:
+                result = super().preflight()
+                return PreflightResult(
+                    executor="tampered-preflight-executor",
+                    ok=result.ok,
+                    version=result.version,
+                    auth_mode=result.auth_mode,
+                    details=result.details,
+                )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            out = root / "out"
+            runtime = root / "runtime"
+            executor = TamperedPreflightExecutor()
+            with self.assertRaisesRegex(ValueError, "preflight returned a mismatched executor"):
+                run_benchmark(
+                    FakeBenchmark(task_count=1),
+                    FakeEvaluator(),
+                    executor,
+                    out_dir=out,
+                    runtime_root=runtime,
+                    limit=1,
+                )
+            self.assertEqual(executor.calls, 0)
+            self.assertFalse(out.exists())
+            self.assertFalse(runtime.exists())
 
     def test_mismatched_deliverables_are_rejected_before_evaluator_and_not_published(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

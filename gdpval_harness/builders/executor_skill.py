@@ -174,6 +174,15 @@ class ExecutorSkillBuilder(Builder):
         self.executor = executor
         self._preflight_result: BuilderPreflightResult | None = None
 
+    def _executor_invocation_mode(self) -> str | None:
+        try:
+            value = getattr(self.executor, "invocation_mode", None)
+        except Exception:
+            return None
+        if isinstance(value, str) and value.strip():
+            return value
+        return None
+
     def preflight(self) -> BuilderPreflightResult:
         try:
             result = self.executor.preflight()
@@ -185,6 +194,7 @@ class ExecutorSkillBuilder(Builder):
                 builder_executor_version=None,
                 builder_executor_auth_mode=None,
                 details=(f"executor preflight raised {type(exc).__name__}",),
+                builder_executor_invocation_mode=self._executor_invocation_mode(),
             )
             self._preflight_result = mapped
             return mapped
@@ -197,6 +207,7 @@ class ExecutorSkillBuilder(Builder):
                 builder_executor_version=None,
                 builder_executor_auth_mode=None,
                 details=("executor preflight returned an invalid result",),
+                builder_executor_invocation_mode=self._executor_invocation_mode(),
             )
             self._preflight_result = mapped
             return mapped
@@ -208,6 +219,7 @@ class ExecutorSkillBuilder(Builder):
             builder_executor_version=result.version,
             builder_executor_auth_mode=result.auth_mode,
             details=result.details,
+            builder_executor_invocation_mode=self._executor_invocation_mode(),
         )
         self._preflight_result = mapped
         return mapped

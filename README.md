@@ -209,7 +209,27 @@ Local blind comparisons additionally write:
   judge/tasks/<task-id>/trial_<n>/...
 ```
 
-Metadata records non-secret provenance including repository commit, executor/judge executor and versions, invocation/auth modes, selected model, workspace isolation, network/tool policy, timestamps, task/run limits, reference configuration, and exit state. API keys, OAuth/session credentials, and account tokens are not recorded.
+### Generic run reproducibility record
+
+Generic runs write `run-metadata.json` with schema version 4. The record keeps task identity separate from prompt
+evidence. `task_id` identifies the benchmark row, while `task_sha256` is the SHA-256 of the exact UTF-8 bytes in that
+task's canonical `task-prompt.txt`, never a hash of `task_id`.
+
+The schema records benchmark revision and revision status; typed executor identity, version, model, invocation mode,
+authentication mode, and runtime; intervention identity and type, revision/status, reviewed hashes, logical files, and
+application method; evaluator identity, version, and revision, with explicit judge
+applicability; the actual application run ID;
+repository commit and worktree status; `configuration_sha256` for the allowlisted configuration and a stable
+`run_fingerprint_sha256`; and start time, finish time, and status. Unknown optional descriptor values are `null`;
+revision availability and judge applicability use explicit companion fields, and outer experiment application IDs use
+`application_run_id_status`. Existing metrics and outcomes are unchanged.
+
+For compatibility, every execution record retains `execution.metadata` as an empty mapping (`{}`). Arbitrary
+`ExecutionResult.metadata`, environment values, commands, credentials, output payloads, and preflight details are not
+copied into provenance JSON or hashes. Raw executor logs remain separate and may contain model or tool output, so these
+records do not provide blanket secret detection.
+
+API keys, OAuth/session credentials, and account tokens are not recorded in the reproducibility metadata.
 
 ## Safety and scope
 

@@ -102,6 +102,33 @@ A conditioned local run records:
 
 Keep the condition file together with the run metadata when publishing or reviewing an experiment. The label is descriptive metadata, not evidence that a particular intervention was actually applied; `condition_file_sha256` and `condition_applied_to_prompt` provide the machine-recorded link to the applied instructions.
 
+## Experiment reproducibility record (schema v2)
+
+The outer `experiment-metadata.json` record uses schema version 2. Each `entries[]` row maps the opaque schedule key
+through the sealed Builder artifact and the application record to durable results:
+
+```text
+entries[].schedule_id                         opaque schedule key only
+entries[].build.artifact                      sealed Builder artifact record
+entries[].application.application_run_id      actual application ID, when available
+entries[].application.run_metadata_path       nested application run metadata path
+entries[].application.results_path            -> results.jsonl[].evaluation.metrics/outcomes
+```
+
+Common reproducibility fields cover `configuration_sha256` for the allowlisted configuration and
+`run_fingerprint_sha256`, profile identity/hash, input revisions and manifests/file hashes, arm identity, task identity
+and `task_sha256`, repository commit/worktree status. The fingerprint excludes random IDs, timestamps, and filesystem
+paths. Those values remain navigation/provenance fields and are not stable semantic inputs. The task hash is
+computed from the exact UTF-8 canonical prompt bytes in `task-prompt.txt`, not from a task ID.
+
+If an application fails before it can provide a summary, its application ID is `null` or otherwise marked unavailable.
+Any nested durable run-metadata or results paths that were actually created remain recorded. The harness does not
+invent an application ID, metrics, outcomes, or result. Builder and application provenance is outer-only and is not
+handed to the application task, prompt, workspace, or environment.
+
+The existing legacy condition resume guard is unchanged. The generic experiment runner still has no resume mechanism; a
+run fingerprint is future-verifiable evidence, not a new way to resume or merge a run.
+
 ## Codex subscription boundary
 
 For Codex local policy execution and Codex local judging, the harness sets `forced_login_method="chatgpt"`. When model-generated network access is disabled, policy execution also sets `web_search="disabled"`; the local Codex judge always disables web search and retains the verified root-deny/workspace-read permission profile. These controls supplement the existing API-credential scrubbing and login-status preflight so the subscription-backed path fails closed instead of silently switching authentication modes.
