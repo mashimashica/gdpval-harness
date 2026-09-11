@@ -24,32 +24,62 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-def _text(value: str | bytes | None) -> str:
-    if value is None:
-        return ""
-    return value.decode(errors="replace") if isinstance(value, bytes) else value
-
-
 def _toml_string(value: str) -> str:
     """JSON string quoting is also valid TOML basic-string quoting."""
     return json.dumps(value)
 
 
-def _permission_profile(workspace: Path) -> str:
-    workspace_key = _toml_string(str(workspace.resolve()))
-    return (
-        '{filesystem={":root"="deny",":minimal"="read",'
-        f'{workspace_key}="read"}},network={{enabled=false}}}}'
-    )
+def _resolved_command_read_paths(command: str, environment: Mapping[str, str]) -> tuple[str, ...]:
+    located = shutil.which(command, path=environment.get("PATH"))
+    if located is None and os.path.isfile(command):
+        located = command
+    if located is None:
+        return ()
+
+    direct = Path(located).absolute()
+    try:
+        resolved = direct.resolve(strict=True)
+    except OSError:
+        resolved = direct.resolve()
+
+    paths: list[str] = []
+    for path in (direct, resolved):
+        value = str(path)
+        if value not in paths:
+            paths.append(value)
+    return tuple(paths)
 
 
-def _profile_overrides(workspace: Path) -> list[str]:
+def _permission_profile(workspace: Path, runtime_read_paths: tuple[str, ...] = ()) -> str:
+    entries = [
+        '":root"="deny"',
+        '":minimal"="read"',
+        f"{_toml_string(str(workspace.resolve()))}=\"read\"",
+    ]
+    entries.extend(f"{_toml_string(path)}=\"read\"" for path in runtime_read_paths)
+    return f'{{filesystem={{{",".join(entries)}}},network={{enabled=false}}}}'
+
+
+def _profile_overrides(workspace: Path, runtime_read_paths: tuple[str, ...] = ()) -> list[str]:
     return [
         "-c",
         f'default_permissions="{_PERMISSION_PROFILE}"',
         "-c",
-        f"permissions.{_PERMISSION_PROFILE}={_permission_profile(workspace)}",
+        f"permissions.{_PERMISSION_PROFILE}={_permission_profile(workspace, runtime_read_paths)}",
     ]
+
+
+def _shell_environment_policy(request: JudgeRequest) -> str:
+    runtime_tmp = str(request.environment.get("TMPDIR") or request.workspace.resolve())
+    values = {
+        "HOME": str(request.workspace.resolve()),
+        "PATH": os.defpath,
+        "TEMP": runtime_tmp,
+        "TMP": runtime_tmp,
+        "TMPDIR": runtime_tmp,
+    }
+    assignments = ",".join(f"{name}={_toml_string(value)}" for name, value in sorted(values.items()))
+    return f'{{inherit="none",ignore_default_excludes=false,set={{{assignments}}}}}'
 
 
 class CodexJudgeExecutor(JudgeExecutor):
@@ -85,6 +115,10 @@ class CodexJudgeExecutor(JudgeExecutor):
                 "use macOS, Linux, or WSL2"
             )
 
+        runtime_read_paths = _resolved_command_read_paths(self.policy.command, environment)
+        if not runtime_read_paths:
+            return False, f"could not resolve Codex command for sandbox probe: {self.policy.command}"
+
         try:
             with tempfile.TemporaryDirectory(prefix="gdpval-codex-read-probe-") as tmp:
                 root = Path(tmp)
@@ -96,7 +130,7 @@ class CodexJudgeExecutor(JudgeExecutor):
                 denied.write_text("must-not-be-readable\n", encoding="utf-8")
 
                 command = [self.policy.command]
-                command.extend(_profile_overrides(workspace))
+                command.extend(_profile_overrides(workspace, runtime_read_paths))
                 command.extend(
                     [
                         "sandbox",
@@ -135,7 +169,7 @@ class CodexJudgeExecutor(JudgeExecutor):
 
     def preflight(self, environment: Mapping[str, str] | None = None) -> JudgePreflightResult:
         sanitized = subscription_environment(environment)
-        if shutil.which(self.policy.command, path=sanitized.get("PATH")) is None and not os.path.isfile(self.policy.command):
+        if not _resolved_command_read_paths(self.policy.command, sanitized):
             return JudgePreflightResult(
                 judge_executor=self.name,
                 ok=False,
@@ -208,6 +242,7 @@ class CodexJudgeExecutor(JudgeExecutor):
         )
 
     def build_command(self, request: JudgeRequest) -> list[str]:
+        runtime_read_paths = _resolved_command_read_paths(self.policy.command, request.environment)
         command = [
             self.policy.command,
             "exec",
@@ -224,11 +259,13 @@ class CodexJudgeExecutor(JudgeExecutor):
             "-c",
             'approval_policy="never"',
         ]
-        command.extend(_profile_overrides(request.workspace))
+        command.extend(_profile_overrides(request.workspace, runtime_read_paths))
         command.extend(
             [
                 "-c",
-                "shell_environment_policy.ignore_default_excludes=false",
+                "allow_login_shell=false",
+                "-c",
+                f"shell_environment_policy={_shell_environment_policy(request)}",
             ]
         )
         if request.model:
@@ -243,44 +280,41 @@ class CodexJudgeExecutor(JudgeExecutor):
         stderr_path = request.executor_dir / "stderr.log"
         final_path = request.executor_dir / "final-message.txt"
         prompt_path.write_text(request.task_prompt, encoding="utf-8")
+        stdout_path.write_bytes(b"")
+        stderr_path.write_bytes(b"")
         started_at = _now()
         exit_code = None
-        stdout = stderr = ""
         verdict = None
         parse_error = None
         sanitized = subscription_environment(request.environment)
         try:
-            completed = subprocess.run(
-                self.build_command(request),
-                input=request.task_prompt,
-                text=True,
-                errors="replace",
-                capture_output=True,
-                cwd=request.workspace,
-                env=sanitized,
-                timeout=request.timeout_seconds,
-                check=False,
-            )
+            with stdout_path.open("ab") as stdout_handle, stderr_path.open("ab") as stderr_handle:
+                completed = subprocess.run(
+                    self.build_command(request),
+                    input=request.task_prompt.encode("utf-8"),
+                    stdout=stdout_handle,
+                    stderr=stderr_handle,
+                    cwd=request.workspace,
+                    env=sanitized,
+                    timeout=request.timeout_seconds,
+                    check=False,
+                )
             exit_code = completed.returncode
-            stdout = completed.stdout or ""
-            stderr = completed.stderr or ""
             if exit_code == 0:
+                stdout = stdout_path.read_text(encoding="utf-8", errors="replace")
                 final_text = final_path.read_text(encoding="utf-8", errors="replace") if final_path.is_file() else stdout
                 try:
                     verdict = parse_verdict(final_text)
                 except ValueError as exc:
                     parse_error = str(exc)
-        except subprocess.TimeoutExpired as exc:
-            stdout, stderr = _text(exc.stdout), _text(exc.stderr)
+        except subprocess.TimeoutExpired:
             parse_error = "judge timed out"
         except KeyboardInterrupt:
             raise
         except OSError as exc:
-            stderr = str(exc)
+            with stderr_path.open("ab") as stderr_handle:
+                stderr_handle.write((str(exc) + "\n").encode("utf-8", errors="replace"))
             parse_error = str(exc)
-        finally:
-            stdout_path.write_text(stdout, encoding="utf-8")
-            stderr_path.write_text(stderr, encoding="utf-8")
 
         return JudgeResult(
             task_id=request.task_id,
@@ -299,6 +333,7 @@ class CodexJudgeExecutor(JudgeExecutor):
                 "sandbox": "permission-profile/root-deny/workspace-read-only",
                 "read_confinement": "root-deny + minimal-read + anonymous-workspace-read",
                 "network_policy": "disabled by permission profile",
+                "shell_environment_policy": "anonymous-minimal-no-parent-inheritance",
                 "cloud_execution": False,
                 "parse_error": parse_error,
             },
