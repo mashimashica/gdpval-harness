@@ -13,6 +13,12 @@ help="$(./eval --help)"
 grep -q 'benchmarks' <<<"$help"
 grep -q 'executors' <<<"$help"
 grep -q 'run' <<<"$help"
+grep -q 'experiment' <<<"$help"
+
+experiment_help="$(./eval experiment --help)"
+grep -q -- '--input-root' <<<"$experiment_help"
+grep -q -- '--order-seed' <<<"$experiment_help"
+grep -q -- '--runtime-root' <<<"$experiment_help"
 
 run_help="$(./eval run --help)"
 grep -q -- '--intervention' <<<"$run_help"

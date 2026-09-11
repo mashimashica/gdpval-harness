@@ -43,6 +43,34 @@ Then compare the completed deliverables independently using the verified local b
 
 For an ALPS experiment, `intervention.md` can contain the ALPS-derived instructions or work-design material. ALPS is not a built-in GDPval mode and no ALPS-specific behavior is hard-coded into the harness.
 
+## Pinned ALPS creation-time profile
+
+`config/experiments/alps-skill-creation.json` records a generic Builder experiment. The `skill-creator-only` arm is the baseline: the Builder receives the caller-supplied self-contained `skill-creator` source root with the five-file creation-time closure `SKILL.md`, `references/openai_yaml.md`, `scripts/generate_openai_yaml.py`, `scripts/init_skill.py`, and `scripts/quick_validate.py`. Those five semantic files match OpenAI's bundled [`skills/.system/skill-creator`](https://github.com/openai/skills/tree/main/skills/.system/skill-creator) distribution. Its UI metadata, icons, and license packaging are excluded. The `skill-creator-plus-alps` arm is the treatment: it receives the same exact `skill-creator` bundle plus the pinned `alps-work-design` input. The hypothesis concerns ALPS as a creation-time Builder input; it does not treat ALPS as an application-time plugin or a native runtime mode.
+
+The `skill-creator` revision is intentionally unavailable and has no expected bundle hash in this profile; the linked mutable `main` branch is descriptive source identification, not a pin. Loader and outer run provenance capture the bound file and bundle hashes, and the caller must bind the same loaded five-file source root to both arms. A different Skill Creator distribution requires its own generic profile with its full explicit allowlist; the harness core has no Skill Creator-specific path or exception.
+
+Run the profile by binding both input roots explicitly and keeping the Builder and application settings common:
+
+```bash
+./eval experiment config/experiments/alps-skill-creation.json \
+  --input-root skill-creator=/absolute/path/to/skill-creator-source \
+  --input-root alps-work-design=/absolute/path/to/alps-checkout \
+  --builder-executor codex \
+  --executor codex \
+  --builder-model '<common-model-id>' \
+  --model '<common-model-id>' \
+  --builder-timeout 12600 \
+  --executor-timeout 12600 \
+  --limit 10 \
+  --order-seed 7 \
+  --out /absolute/path/to/alps-results \
+  --runtime-root /absolute/path/to/neutral-runtime
+```
+
+The ALPS checkout must have HEAD `cf31ca93a1b5379e2ddbd430f9ea416192fb6797`, and its 14-file English creation-time closure must validate to bundle SHA-256 `1feb183fb6e01f7b48469c3669968df0741d93ddde428cfaad6e05350c2f28c4`. The closure includes both ALPS Skills, their English design references, and the optional worked example. The worked example's `baseline.csv` and `candidate.csv` are static files shipped in that pinned ALPS source; they are neither outputs of this GDPval experiment nor another arm or condition. The closure deliberately excludes host UI and icons, Japanese locales, plugin/root installation and provenance files, and other packaging material. The external `agentskills.io` URLs referenced by ALPS remain unpinned dependencies.
+
+After the Builder seals a generated Skill, the application stage receives only that newly sealed Skill. It does not receive the ALPS source or plugin. The profile and core remain generic: ALPS-specific behavior is carried by the input data and profile arms, not by a conditional in the harness. Use a condition-neutral runtime root such as `/absolute/path/to/neutral-runtime`; its name and all ancestors should omit profile, input, arm, source, and evaluation labels. The `--out` path is outer provenance and may remain experiment-specific. Shared task selection, executor/model/timeout settings, order seed, and input hashes are outer provenance. They do not prove semantic non-leakage inside generated Skill prose, and OS-level read confinement remains unverified; use the dedicated neutral runtime path for that reason.
+
 ## Semantics
 
 `--condition LABEL` records an arbitrary label in run provenance. The label itself is not inserted into the model prompt.
