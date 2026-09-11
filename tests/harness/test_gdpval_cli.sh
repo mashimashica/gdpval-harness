@@ -21,6 +21,7 @@ grep -q -- '--executor NAME' <<<"$help"
 grep -q -- '--judge-executor NAME' <<<"$help"
 grep -q -- '--condition LABEL' <<<"$help"
 grep -q -- '--condition-file FILE' <<<"$help"
+grep -q 'rejected by Stirrup' <<<"$help"
 
 providers="$(./gdpval providers)"
 grep -q '^openai ' <<<"$providers"
@@ -50,6 +51,10 @@ if ./gdpval aa-v2 --refs /tmp --executor not-real --no-metadata >/dev/null 2>&1;
 fi
 if ./gdpval aa-v2 --refs /tmp --judge-executor codex --no-metadata >/dev/null 2>&1; then
   echo "aa-v2 unexpectedly accepted a local judge executor" >&2
+  exit 1
+fi
+if ./gdpval run --executor stirrup --executor-timeout 10 --no-metadata >/dev/null 2>&1; then
+  echo "Stirrup unexpectedly accepted an unsupported executor timeout" >&2
   exit 1
 fi
 
