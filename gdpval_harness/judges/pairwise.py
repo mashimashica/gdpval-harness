@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import re
 import shutil
 from dataclasses import dataclass
@@ -24,6 +25,7 @@ _IGNORED_SUBMISSION_NAMES = {
     "reference_files",
 }
 _VERDICT_LINE_RE = re.compile(r"BOXED\[(A|B|TIE)\]", re.IGNORECASE)
+_NORMALIZED_MTIME_NS = 946684800 * 1_000_000_000  # 2000-01-01T00:00:00Z
 
 
 @dataclass(frozen=True)
@@ -112,6 +114,21 @@ def matched_tasks(candidate_a: Path, candidate_b: Path) -> list[tuple[str, Path,
     return [(name, tasks_a[name], tasks_b[name]) for name in sorted(tasks_a)]
 
 
+def _normalize_file_metadata(source: Path, destination: Path) -> None:
+    executable = bool(source.stat().st_mode & 0o111)
+    destination.chmod(0o555 if executable else 0o444)
+    os.utime(destination, ns=(_NORMALIZED_MTIME_NS, _NORMALIZED_MTIME_NS), follow_symlinks=False)
+
+
+def _normalize_directories(root: Path) -> None:
+    directories = [path for path in root.rglob("*") if path.is_dir()]
+    for path in sorted(directories, key=lambda item: len(item.parts), reverse=True):
+        path.chmod(0o555)
+        os.utime(path, ns=(_NORMALIZED_MTIME_NS, _NORMALIZED_MTIME_NS), follow_symlinks=False)
+    root.chmod(0o555)
+    os.utime(root, ns=(_NORMALIZED_MTIME_NS, _NORMALIZED_MTIME_NS), follow_symlinks=False)
+
+
 def _copy_tree(source: Path, target: Path, *, submission: bool = False) -> None:
     source = _assert_directory(source)
     target.mkdir(parents=True, exist_ok=True)
@@ -126,7 +143,12 @@ def _copy_tree(source: Path, target: Path, *, submission: bool = False) -> None:
             destination.mkdir(parents=True, exist_ok=True)
         elif path.is_file():
             destination.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(path, destination)
+            # copyfile preserves bytes but deliberately does not preserve source
+            # ownership, timestamps, xattrs, or mode bits. Reintroduce only the
+            # executable/non-executable semantic using a canonical mode below.
+            shutil.copyfile(path, destination)
+            _normalize_file_metadata(path, destination)
+    _normalize_directories(target)
 
 
 def _reference_dir(candidate: Path) -> Path:
