@@ -33,7 +33,7 @@ Core options:
   --out DIR             Output directory
   --parallel N          Evaluator and agent concurrency
   --executor NAME       Policy agent runtime (default: stirrup)
-  --executor-timeout S  Per-task policy executor wall-clock timeout
+  --executor-timeout S  Per-task timeout for local executors; rejected by Stirrup
   --executor-network MODE
                         Local policy tool network: disabled (default) or enabled
   --condition LABEL     Generic experiment-condition label (metadata only)
@@ -44,7 +44,7 @@ Core options:
   --base-url URL        Policy model base URL for executor=stirrup
 
 Judge options:
-  --judge-executor NAME Local subscription judge: codex or claude-code
+  --judge-executor NAME Local subscription judge: codex; claude-code fails closed until read confinement is verifiable
   --judge-trials N      Local blind judge trials per task (default: 2)
   --judge-timeout S     Local judge wall-clock timeout per trial (default: 3600)
   --judge-panel MODE    API judge mode: aa-v2 (default) or single
@@ -180,6 +180,11 @@ if [[ ! -x "$PREFLIGHT" || ! -f "$METADATA" || ! -f "$RECIPE" ]]; then
 fi
 
 export GDPVAL_EXECUTOR="${GDPVAL_EXECUTOR:-stirrup}"
+
+if [[ "$GDPVAL_EXECUTOR" == stirrup && -n "${GDPVAL_EXECUTOR_TIMEOUT:-}" ]]; then
+  echo "--executor-timeout is not supported with --executor stirrup; omit it or use a local executor" >&2
+  exit 2
+fi
 
 if [[ "${GDPVAL_COMMAND:-run}" == aa-v2 ]]; then
   if [[ "$GDPVAL_EXECUTOR" != stirrup ]]; then
