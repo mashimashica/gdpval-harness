@@ -63,6 +63,55 @@ class LocalJudgeExecutorTests(unittest.TestCase):
             self.assertNotIn("cloud", command)
             self.assertEqual(command[-1], "-")
 
+    def test_codex_runtime_root_does_not_reopen_auth_home(self) -> None:
+        with tempfile.TemporaryDirectory() as root:
+            base = Path(root)
+            auth_home = base / "home"
+            runtime_bin = auth_home / "bin"
+            runtime_bin.mkdir(parents=True)
+            command_path = runtime_bin / "codex"
+            command_path.write_text("#!/bin/sh\n", encoding="utf-8")
+            command_path.chmod(0o755)
+            request = self.request(root, environment={"PATH": str(runtime_bin), "HOME": str(auth_home)})
+            command = CodexJudgeExecutor(command=str(command_path)).build_command(request)
+            profile = next(
+                item for item in command if item.startswith("permissions.gdpval-harness-blind-judge=")
+            )
+            self.assertIn(json.dumps(str(command_path.resolve())), profile)
+            self.assertNotIn(f'{json.dumps(str(auth_home.resolve()))}="read"', profile)
+
+    def test_codex_runtime_root_does_not_reopen_candidate_or_output_parent(self) -> None:
+        with tempfile.TemporaryDirectory() as root:
+            base = Path(root)
+            runtime_root = base / "shared"
+            runtime_bin = runtime_root / "bin"
+            runtime_bin.mkdir(parents=True)
+            command_path = runtime_bin / "codex"
+            command_path.write_text("#!/bin/sh\n", encoding="utf-8")
+            command_path.chmod(0o755)
+            candidate = runtime_root / "candidate"
+            out = runtime_root / "out"
+            home = base / "home"
+            candidate.mkdir()
+            out.mkdir()
+            home.mkdir()
+            request = self.request(root, environment={"PATH": str(runtime_bin), "HOME": str(home)})
+            with patch.dict(
+                os.environ,
+                {
+                    "GDPVAL_RUN_A": str(candidate),
+                    "GDPVAL_RUN_B": str(base / "other-candidate"),
+                    "OUT": str(out),
+                },
+                clear=False,
+            ):
+                command = CodexJudgeExecutor(command=str(command_path)).build_command(request)
+            profile = next(
+                item for item in command if item.startswith("permissions.gdpval-harness-blind-judge=")
+            )
+            self.assertIn(json.dumps(str(command_path.resolve())), profile)
+            self.assertNotIn(f'{json.dumps(str(runtime_root.resolve()))}="read"', profile)
+
     def test_codex_judge_shell_environment_excludes_parent_and_proxy_credentials(self) -> None:
         with tempfile.TemporaryDirectory() as root:
             base = Path(root)
@@ -105,8 +154,8 @@ class LocalJudgeExecutorTests(unittest.TestCase):
             judge = CodexJudgeExecutor(command=str(command_path))
 
             def interrupt_after_output(*args, **kwargs):
-                kwargs["stdout"].write(b"partial stdout\n")
-                kwargs["stderr"].write(b"partial stderr\n")
+                kwargs["stdout"].write(b"partial \xff stdout\n")
+                kwargs["stderr"].write(b"partial \xff stderr\n")
                 kwargs["stdout"].flush()
                 kwargs["stderr"].flush()
                 raise KeyboardInterrupt
@@ -117,8 +166,14 @@ class LocalJudgeExecutorTests(unittest.TestCase):
             ):
                 judge.judge(request)
 
-            self.assertEqual((request.executor_dir / "stdout.log").read_text(), "partial stdout\n")
-            self.assertEqual((request.executor_dir / "stderr.log").read_text(), "partial stderr\n")
+            self.assertEqual(
+                (request.executor_dir / "stdout.log").read_text(encoding="utf-8"),
+                "partial \ufffd stdout\n",
+            )
+            self.assertEqual(
+                (request.executor_dir / "stderr.log").read_text(encoding="utf-8"),
+                "partial \ufffd stderr\n",
+            )
 
     def test_claude_judge_restricts_reads_tools_network_and_writes(self) -> None:
         with tempfile.TemporaryDirectory() as root:

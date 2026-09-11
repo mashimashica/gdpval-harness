@@ -19,6 +19,14 @@ from gdpval_harness.judges.pairwise import parse_verdict
 
 _PERMISSION_PROFILE = "gdpval-harness-blind-judge"
 _SYSTEM_RUNTIME_ROOTS = {Path("/"), Path("/bin"), Path("/sbin"), Path("/usr")}
+_PROTECTED_ENV_PATHS = (
+    "HOME",
+    "USERPROFILE",
+    "CODEX_HOME",
+    "XDG_CONFIG_HOME",
+    "APPDATA",
+    "LOCALAPPDATA",
+)
 
 
 def _now() -> str:
@@ -28,6 +36,38 @@ def _now() -> str:
 def _toml_string(value: str) -> str:
     """JSON string quoting is also valid TOML basic-string quoting."""
     return json.dumps(value)
+
+
+def _resolved_path(path: Path) -> Path:
+    try:
+        return path.resolve(strict=False)
+    except OSError:
+        return path.absolute()
+
+
+def _paths_overlap(left: Path, right: Path) -> bool:
+    left_resolved = _resolved_path(left)
+    right_resolved = _resolved_path(right)
+    return (
+        left_resolved == right_resolved
+        or left_resolved in right_resolved.parents
+        or right_resolved in left_resolved.parents
+    )
+
+
+def _protected_read_roots(environment: Mapping[str, str]) -> tuple[Path, ...]:
+    """Return user/auth and harness trees that a runtime allowance must not reopen."""
+    roots: list[Path] = []
+    values = [environment.get(name) for name in _PROTECTED_ENV_PATHS]
+    values.extend(os.getenv(name) for name in ("GDPVAL_RUN_A", "GDPVAL_RUN_B"))
+    values.append(os.getenv("OUT", "./results/compare-runs"))
+    for value in values:
+        if not value:
+            continue
+        resolved = _resolved_path(Path(value))
+        if resolved not in roots:
+            roots.append(resolved)
+    return tuple(roots)
 
 
 def _resolved_command_read_paths(command: str, environment: Mapping[str, str]) -> tuple[str, ...]:
@@ -46,7 +86,10 @@ def _resolved_command_read_paths(command: str, environment: Mapping[str, str]) -
     candidates = [direct, resolved]
     if resolved.parent.name == "bin":
         runtime_root = resolved.parent.parent
-        if runtime_root not in _SYSTEM_RUNTIME_ROOTS:
+        protected_roots = _protected_read_roots(environment)
+        if runtime_root not in _SYSTEM_RUNTIME_ROOTS and not any(
+            _paths_overlap(runtime_root, protected) for protected in protected_roots
+        ):
             candidates.append(runtime_root)
 
     paths: list[str] = []
@@ -87,6 +130,23 @@ def _shell_environment_policy(request: JudgeRequest) -> str:
     }
     assignments = ",".join(f"{name}={_toml_string(value)}" for name, value in sorted(values.items()))
     return f'{{inherit="none",ignore_default_excludes=false,set={{{assignments}}}}}'
+
+
+def _normalize_utf8_log(path: Path) -> None:
+    """Keep streamed subprocess output durable while making persisted text valid UTF-8."""
+    try:
+        raw = path.read_bytes()
+    except OSError:
+        return
+    normalized = raw.decode("utf-8", errors="replace").encode("utf-8")
+    if normalized == raw:
+        return
+    try:
+        path.write_bytes(normalized)
+    except OSError:
+        # Do not mask an executor failure or KeyboardInterrupt; the raw bytes are
+        # still durable even if an unexpected filesystem error prevents cleanup.
+        return
 
 
 class CodexJudgeExecutor(JudgeExecutor):
@@ -322,6 +382,10 @@ class CodexJudgeExecutor(JudgeExecutor):
             with stderr_path.open("ab") as stderr_handle:
                 stderr_handle.write((str(exc) + "\n").encode("utf-8", errors="replace"))
             parse_error = str(exc)
+        finally:
+            _normalize_utf8_log(stdout_path)
+            _normalize_utf8_log(stderr_path)
+            _normalize_utf8_log(final_path)
 
         return JudgeResult(
             task_id=request.task_id,
