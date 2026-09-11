@@ -18,6 +18,7 @@ from gdpval_harness.judges.pairwise import parse_verdict
 
 
 _PERMISSION_PROFILE = "gdpval-harness-blind-judge"
+_SYSTEM_RUNTIME_ROOTS = {Path("/"), Path("/bin"), Path("/sbin"), Path("/usr")}
 
 
 def _now() -> str:
@@ -42,8 +43,14 @@ def _resolved_command_read_paths(command: str, environment: Mapping[str, str]) -
     except OSError:
         resolved = direct.resolve()
 
+    candidates = [direct, resolved]
+    if resolved.parent.name == "bin":
+        runtime_root = resolved.parent.parent
+        if runtime_root not in _SYSTEM_RUNTIME_ROOTS:
+            candidates.append(runtime_root)
+
     paths: list[str] = []
-    for path in (direct, resolved):
+    for path in candidates:
         value = str(path)
         if value not in paths:
             paths.append(value)
