@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from gdpval_harness.benchmarks.aime26 import AIME26Benchmark
-from gdpval_harness.benchmarks.base import Benchmark, EvaluatorType
+from gdpval_harness.benchmarks.base import Benchmark
 from gdpval_harness.benchmarks.bigcodebench import BigCodeBenchBenchmark
 from gdpval_harness.benchmarks.gdpval import GDPvalBenchmark
 
@@ -16,7 +16,6 @@ from gdpval_harness.benchmarks.gdpval import GDPvalBenchmark
 class BenchmarkDescriptor:
     name: str
     status: str
-    evaluator_type: EvaluatorType
     supported_executors: tuple[str, ...]
     assets: tuple[str, ...]
     sandbox_requirement: str
@@ -26,33 +25,29 @@ class BenchmarkDescriptor:
 _BENCHMARKS = {
     "gdpval": BenchmarkDescriptor(
         name="gdpval",
-        status="supported; evaluation remains on the existing GDPval rubric/pairwise path",
-        evaluator_type=EvaluatorType.LLM_RUBRIC,
+        status="supported; task execution and reference-file materialization",
         supported_executors=("codex", "claude-code", "cursor"),
         assets=("benchmarks/gdpval/data/gdpval_benchmark.jsonl", "reference_files"),
         sandbox_requirement="per-task writable workspace; reference files must remain unchanged",
-        network_requirement="disabled for policy execution by default; preparation/reference download may require network",
+        network_requirement=(
+            "disabled for policy execution by default; preparation/reference download may require network"
+        ),
     ),
     "aime26": BenchmarkDescriptor(
         name="aime26",
-        status="supported",
-        evaluator_type=EvaluatorType.BENCHMARK_NATIVE,
+        status="supported; task execution and prompt materialization",
         supported_executors=("codex",),
         assets=("benchmarks/aime26/data/aime26_benchmark.jsonl",),
-        sandbox_requirement="per-task writable workspace; evaluator is local math_verify",
+        sandbox_requirement="per-task writable workspace",
         network_requirement="disabled for policy execution; preparation may require network",
     ),
     "bigcodebench": BenchmarkDescriptor(
         name="bigcodebench",
-        status="supported",
-        evaluator_type=EvaluatorType.EXECUTABLE_TESTS,
+        status="supported; task execution and prompt materialization",
         supported_executors=("codex",),
-        assets=(
-            "benchmarks/bigcodebench/data/bigcodebench_benchmark.jsonl",
-            "resources_servers/bigcodebench/.bcb_venv",
-        ),
-        sandbox_requirement="policy workspace separated from BigCodeBench grader venv/subprocess",
-        network_requirement="disabled for policy execution; preparation/first grader-venv build may require network",
+        assets=("benchmarks/bigcodebench/data/bigcodebench_benchmark.jsonl",),
+        sandbox_requirement="per-task writable workspace",
+        network_requirement="disabled for policy execution; preparation may require network",
     ),
 }
 
@@ -88,7 +83,6 @@ def create_benchmark(name: str, *, root: Path | None = None) -> Benchmark:
             root=repo_root,
             dataset_path=repo_root / "benchmarks" / "bigcodebench" / "data" / "bigcodebench_benchmark.jsonl",
             prepare_script=repo_root / "benchmarks" / "bigcodebench" / "prepare.py",
-            resource_dir=repo_root / "resources_servers" / "bigcodebench",
         )
     get_benchmark_descriptor(name)
     raise AssertionError("unreachable")

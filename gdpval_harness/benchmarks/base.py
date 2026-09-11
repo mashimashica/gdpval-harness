@@ -5,18 +5,10 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from enum import StrEnum
 from pathlib import Path
 from typing import Mapping, Sequence
 
-from gdpval_harness.executors.base import ExecutionResult, TaskSpec
-
-
-class EvaluatorType(StrEnum):
-    BENCHMARK_NATIVE = "benchmark-native"
-    EXECUTABLE_TESTS = "executable-tests"
-    LLM_RUBRIC = "llm-rubric"
-    PAIRWISE = "pairwise"
+from gdpval_harness.executors.base import TaskSpec
 
 
 @dataclass(frozen=True)
@@ -28,21 +20,11 @@ class BenchmarkTask:
     evaluation: Mapping[str, object] = field(default_factory=dict)
 
 
-@dataclass(frozen=True)
-class BenchmarkEvaluation:
-    """Generic result envelope; metric names and meanings remain benchmark-owned."""
-
-    task_id: str
-    metrics: Mapping[str, float]
-    details: Mapping[str, object] = field(default_factory=dict)
-
-
 class Benchmark(ABC):
     """Minimum lifecycle shared by the benchmark integrations inspected by this harness."""
 
     name: str
     revision: str | None
-    evaluator_type: EvaluatorType
 
     @abstractmethod
     def is_prepared(self) -> bool:
@@ -64,7 +46,3 @@ class Benchmark(ABC):
         """Build the executor-facing task after benchmark inputs have been materialized."""
         del workspace, network_policy
         return task.execution
-
-    def evaluate(self, task: BenchmarkTask, result: ExecutionResult) -> BenchmarkEvaluation:
-        """Evaluate one execution when the benchmark supports direct local evaluation."""
-        raise NotImplementedError(f"{self.name} does not expose direct local evaluation through this adapter")

@@ -8,14 +8,22 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from gdpval_harness.benchmarks.base import BenchmarkTask, EvaluatorType
+from gdpval_harness.benchmarks.base import Benchmark, BenchmarkTask
 from gdpval_harness.benchmarks.gdpval import GDPvalBenchmark
+from gdpval_harness.benchmarks.registry import get_benchmark_descriptor
+from gdpval_harness.evaluators.base import EvaluatorType
 from gdpval_harness.executors.base import TaskSpec
 
 
 class BenchmarkAbstractionTests(unittest.TestCase):
     def test_executor_task_spec_contains_no_benchmark_specific_fields(self) -> None:
         self.assertEqual(set(TaskSpec.__dataclass_fields__), {"task_id", "prompt"})
+
+    def test_benchmark_has_no_evaluation_hook_or_type_attribute(self) -> None:
+        self.assertNotIn("evaluate", Benchmark.__dict__)
+        self.assertNotIn("evaluator_type", Benchmark.__dict__)
+        descriptor = get_benchmark_descriptor("gdpval")
+        self.assertNotIn("evaluator_type", descriptor.__dataclass_fields__)
 
     def test_gdpval_keeps_materialization_and_evaluation_data_outside_task_spec(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -50,7 +58,7 @@ class BenchmarkAbstractionTests(unittest.TestCase):
             self.assertEqual(task.materialization["reference_file_urls"], ("https://example.invalid/input.csv",))
             self.assertEqual(task.evaluation["sector"], "finance")
             self.assertEqual(task.evaluation["occupation"], "analyst")
-            self.assertEqual(benchmark.evaluator_type, EvaluatorType.LLM_RUBRIC)
+            self.assertEqual(EvaluatorType.LLM_RUBRIC.value, "llm-rubric")
 
     def test_gdpval_prepare_is_noop_when_dataset_exists(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

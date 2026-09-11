@@ -10,6 +10,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from gdpval_harness.benchmarks.registry import create_benchmark, get_benchmark_descriptor, list_benchmarks
+from gdpval_harness.evaluators.registry import create_evaluator, get_evaluator_descriptor
 from gdpval_harness.executors.registry import create_executor, get_executor_descriptor, list_executors
 from gdpval_harness.runner import run_benchmark
 
@@ -39,11 +40,17 @@ def _parser() -> argparse.ArgumentParser:
 
 def _print_benchmarks() -> None:
     for descriptor in list_benchmarks():
+        evaluator = get_evaluator_descriptor(descriptor.name)
         executors = ",".join(descriptor.supported_executors)
         assets = ",".join(descriptor.assets)
+        evaluator_assets = ",".join(evaluator.assets)
+        requirements = ",".join(evaluator.requirements)
         print(
-            f"{descriptor.name}\t{descriptor.status}\t{descriptor.evaluator_type.value}\t"
-            f"executors={executors}\tassets={assets}\t"
+            f"{descriptor.name}\tbenchmark_status={descriptor.status}\t"
+            f"evaluator={evaluator.name}\tevaluator_status={evaluator.status}\t"
+            f"type={evaluator.evaluator_type.value}\texecutors={executors}\t"
+            f"benchmark_assets={assets}\tevaluator_assets={evaluator_assets}\t"
+            f"requirements={requirements}\tisolation={evaluator.isolation_requirement or 'none'}\t"
             f"sandbox={descriptor.sandbox_requirement}\tnetwork={descriptor.network_requirement}"
         )
 
@@ -73,6 +80,7 @@ def _run(args: argparse.Namespace) -> int:
         raise ValueError("--claude-max-turns must be positive")
 
     benchmark = create_benchmark(args.benchmark)
+    evaluator = create_evaluator(args.benchmark)
     executor = create_executor(
         args.executor,
         network_enabled=args.network,
@@ -81,6 +89,7 @@ def _run(args: argparse.Namespace) -> int:
     out_dir = args.out or _default_out(args.benchmark, args.executor)
     summary = run_benchmark(
         benchmark,
+        evaluator,
         executor,
         out_dir=out_dir,
         limit=args.limit,
@@ -96,6 +105,7 @@ def _run(args: argparse.Namespace) -> int:
                 "status": summary.status,
                 "task_count": summary.task_count,
                 "metrics": dict(summary.metrics),
+                "evaluation_status_counts": dict(summary.evaluation_status_counts),
             },
             sort_keys=True,
         )

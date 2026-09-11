@@ -10,7 +10,8 @@ from pathlib import Path
 from unittest.mock import patch
 
 from gdpval_harness.benchmarks.aime26 import AIME26Benchmark
-from gdpval_harness.benchmarks.base import EvaluatorType
+from gdpval_harness.evaluators.aime26 import AIME26Evaluator
+from gdpval_harness.evaluators.base import EvaluationCandidate, EvaluationRequest, EvaluationStatus, EvaluatorType
 from gdpval_harness.executors.base import ExecutionResult, ExecutionStatus
 
 
@@ -44,6 +45,23 @@ class AIME26BenchmarkTests(unittest.TestCase):
             output_text=output_text,
         )
 
+    def request(self, root: Path, result: ExecutionResult, expected: str = "42") -> EvaluationRequest:
+        return EvaluationRequest(
+            task_id="aime26-01",
+            task_prompt="Solve q",
+            metadata={"expected_answer": expected},
+            candidates=(EvaluationCandidate("policy", result),),
+        )
+
+    def ready_evaluator(self) -> AIME26Evaluator:
+        evaluator = AIME26Evaluator()
+        with patch(
+            "gdpval_harness.evaluators.aime26._math_verify_preflight",
+            return_value=(True, "native verifier ready", "0.8.0"),
+        ):
+            self.assertTrue(evaluator.preflight(Path("/tmp/eval-run")).ok)
+        return evaluator
+
     def test_load_tasks_preserves_native_math_prompt_and_expected_answer(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -62,43 +80,53 @@ class AIME26BenchmarkTests(unittest.TestCase):
                 "inside \\boxed{}.\n\nWhat is 6*7?",
             )
             self.assertEqual(task.evaluation["expected_answer"], "42")
-            self.assertEqual(benchmark.evaluator_type, EvaluatorType.BENCHMARK_NATIVE)
+            self.assertNotIn("evaluate", type(benchmark).__dict__)
+            self.assertEqual(AIME26Evaluator.evaluator_type, EvaluatorType.BENCHMARK_NATIVE)
+
+    def test_preflight_requires_pinned_native_dependency_and_helper(self) -> None:
+        evaluator = AIME26Evaluator()
+        with patch(
+            "gdpval_harness.evaluators.aime26._math_verify_preflight",
+            return_value=(False, "./eval requires math-verify==0.8.0; found math-verify==0.7.0", "0.7.0"),
+        ):
+            result = evaluator.preflight(Path("/tmp/eval-run"))
+        self.assertFalse(result.ok)
+        self.assertIn("math-verify==0.8.0", result.details[0])
 
     def test_evaluate_uses_native_library_verifier_without_llm_fallback(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            benchmark = self.benchmark(root)
-            benchmark.dataset_path.write_text(
-                json.dumps({"question": "What is 6*7?", "expected_answer": "42"}) + "\n",
-                encoding="utf-8",
-            )
-            task = benchmark.load_tasks(1)[0]
             result = self.execution_result(root, output_text="Reasoning... \\boxed{42}")
+            evaluator = self.ready_evaluator()
 
             with patch(
-                "gdpval_harness.benchmarks.aime26._native_math_evaluate",
+                "gdpval_harness.evaluators.aime26._native_math_evaluate",
                 return_value=(1.0, "42"),
             ) as verifier:
-                evaluation = benchmark.evaluate(task, result)
+                evaluation = evaluator.evaluate(self.request(root, result))
 
             verifier.assert_called_once_with("42", "Reasoning... \\boxed{42}")
+            self.assertEqual(evaluation.status, EvaluationStatus.COMPLETED)
             self.assertEqual(evaluation.metrics, {"accuracy": 1.0})
             self.assertEqual(evaluation.details["extracted_answer"], "42")
             self.assertFalse(evaluation.details["llm_judge_used"])
 
+    def test_evaluation_requires_successful_dependency_preflight(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            evaluator = AIME26Evaluator()
+            result = self.execution_result(root, output_text="\\boxed{42}")
+            with self.assertRaisesRegex(RuntimeError, "preflight"):
+                evaluator.evaluate(self.request(root, result))
+
     def test_failed_execution_scores_zero_without_calling_verifier(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            benchmark = self.benchmark(root)
-            benchmark.dataset_path.write_text(
-                json.dumps({"question": "What is 6*7?", "expected_answer": "42"}) + "\n",
-                encoding="utf-8",
-            )
-            task = benchmark.load_tasks(1)[0]
             result = self.execution_result(root, output_text="\\boxed{42}", status=ExecutionStatus.FAILED)
+            evaluator = self.ready_evaluator()
 
-            with patch("gdpval_harness.benchmarks.aime26._native_math_evaluate") as verifier:
-                evaluation = benchmark.evaluate(task, result)
+            with patch("gdpval_harness.evaluators.aime26._native_math_evaluate") as verifier:
+                evaluation = evaluator.evaluate(self.request(root, result))
 
             verifier.assert_not_called()
             self.assertEqual(evaluation.metrics, {"accuracy": 0.0})

@@ -28,6 +28,19 @@ Local execution or local judging does **not** produce an official GDPval-AA v2 s
 
 `executor` is the agent runtime that performs the task. `provider` is the model backend used only by `executor=stirrup`. `judge` / `judge-executor` is independent of both.
 
+## Generic evaluator CLI
+
+The `./eval` CLI selects the default evaluator registered for each benchmark key and keeps evaluation separate from task execution:
+
+```bash
+./eval benchmarks
+./eval run gdpval --executor codex --limit 1 --out runs/eval-gdpval
+```
+
+AIME26 reports `accuracy` after a preflight requiring `math-verify==0.8.0`. BigCodeBench reports `pass_rate` through its separate grader virtual environment and process. For generic GDPval, each task's **evaluation status** is `external`; a run status of `completed` means execution and handoff completed and is not a successful evaluation or score. The CLI exposes this distinction through `evaluation_status_counts`. Generic GDPval makes no rubric, pairwise, model, or judge call, and exports submitted deliverables to `<out>/deliverables/task_<id>/repeat_0` for the existing `./gdpval compare-runs` path. The official rubric and AA-v2 reproduction remain on the existing Stirrup/API routes.
+
+Programmatic callers can inject an explicit evaluator into the generic runner when its `validate_plan` accepts the benchmark's candidate layout. The pairwise adapter is opt-in, requires an injected `JudgeExecutor`, and evaluates exactly two candidates; it is not the GDPval CLI default.
+
 ## Subscription/account-backed local executors
 
 List supported runtimes:

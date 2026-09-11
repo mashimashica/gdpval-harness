@@ -21,6 +21,8 @@ grep -q '^gdpval' <<<"$benchmarks"
 grep -q 'benchmark-native' <<<"$benchmarks"
 grep -q 'executable-tests' <<<"$benchmarks"
 grep -q 'llm-rubric' <<<"$benchmarks"
+grep -q 'math-verify==0.8.0' <<<"$benchmarks"
+grep -q 'rubric/pairwise evaluation remains external' <<<"$benchmarks"
 
 executors="$(./eval executors)"
 grep -q '^codex' <<<"$executors"

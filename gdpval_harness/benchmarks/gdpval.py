@@ -8,7 +8,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from gdpval_harness.benchmarks.base import Benchmark, BenchmarkTask, EvaluatorType
+from gdpval_harness.benchmarks.base import Benchmark, BenchmarkTask
 from gdpval_harness.executors.base import TaskSpec
 
 
@@ -46,7 +46,6 @@ class GDPvalBenchmark(Benchmark):
     # The current upstream prepare script loads openai/gdpval without a pinned
     # dataset revision. Preserve that fact rather than inventing a revision.
     revision = None
-    evaluator_type = EvaluatorType.LLM_RUBRIC
 
     def __init__(self, *, root: Path, dataset_path: Path, prepare_script: Path) -> None:
         self.root = root
