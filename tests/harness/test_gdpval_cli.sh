@@ -10,6 +10,7 @@ cd "$ROOT"
 bash -n gdpval
 bash -n scripts/gdpval_provider.sh
 bash -n scripts/gdpval_preflight.sh
+bash -n tests/harness/test_experiment_conditions.sh
 bash -n nemotron_recipes/lightning-3.5/instruct/gym/gdpval/gdpval.sh
 
 help="$(./gdpval --help)"
@@ -18,7 +19,8 @@ grep -q './gdpval compare-runs --a DIR --b DIR' <<<"$help"
 grep -q './gdpval executors' <<<"$help"
 grep -q -- '--executor NAME' <<<"$help"
 grep -q -- '--judge-executor NAME' <<<"$help"
-grep -q 'rejected by Stirrup' <<<"$help"
+grep -q -- '--condition LABEL' <<<"$help"
+grep -q -- '--condition-file FILE' <<<"$help"
 
 providers="$(./gdpval providers)"
 grep -q '^openai ' <<<"$providers"
@@ -50,10 +52,6 @@ if ./gdpval aa-v2 --refs /tmp --judge-executor codex --no-metadata >/dev/null 2>
   echo "aa-v2 unexpectedly accepted a local judge executor" >&2
   exit 1
 fi
-if ./gdpval run --executor stirrup --executor-timeout 10 --no-metadata >/dev/null 2>&1; then
-  echo "Stirrup unexpectedly accepted an unsupported executor timeout" >&2
-  exit 1
-fi
 
 pycache="$(mktemp -d)"
 trap 'rm -rf "$pycache"' EXIT
@@ -79,5 +77,6 @@ bash tests/harness/test_codex_executor.sh
 bash tests/harness/test_claude_code_executor.sh
 bash tests/harness/test_cursor_executor.sh
 bash tests/harness/test_local_judge_executor.sh
+bash tests/harness/test_experiment_conditions.sh
 
 printf 'gdpval harness self-test passed\n'

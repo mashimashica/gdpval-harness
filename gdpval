@@ -33,9 +33,11 @@ Core options:
   --out DIR             Output directory
   --parallel N          Evaluator and agent concurrency
   --executor NAME       Policy agent runtime (default: stirrup)
-  --executor-timeout S  Per-task timeout for local executors; rejected by Stirrup
+  --executor-timeout S  Per-task policy executor wall-clock timeout
   --executor-network MODE
                         Local policy tool network: disabled (default) or enabled
+  --condition LABEL     Generic experiment-condition label (metadata only)
+  --condition-file FILE Additional instructions for local policy executors
   --provider NAME       Policy provider preset for executor=stirrup
   --model-type TYPE     Gym response model type for executor=stirrup
   --model MODEL         Policy/local-executor model ID when supported
@@ -72,9 +74,10 @@ Other:
   --no-metadata         Do not write run-metadata.json
   -h, --help            Show this help
 
-Executor, provider, and judge are separate concepts. Local subscription-backed
-judge execution is available only for compare-runs (or check) and is never an
-AA-v2 reproduction score.
+Executor, provider, condition, and judge are separate concepts. `--condition`
+is an arbitrary provenance label and has no built-in semantics. `--condition-file`
+is the generic local-executor intervention surface; ALPS or any other method can
+be supplied externally without being hard-coded into the GDPval core.
 USAGE
 }
 
@@ -105,6 +108,8 @@ while (( $# )); do
     --executor) require_value "$1" "${2-}"; export GDPVAL_EXECUTOR="$2"; shift 2 ;;
     --executor-timeout) require_value "$1" "${2-}"; export GDPVAL_EXECUTOR_TIMEOUT="$2"; shift 2 ;;
     --executor-network) require_value "$1" "${2-}"; export GDPVAL_EXECUTOR_NETWORK="$2"; shift 2 ;;
+    --condition) require_value "$1" "${2-}"; export GDPVAL_CONDITION="$2"; shift 2 ;;
+    --condition-file) require_value "$1" "${2-}"; export GDPVAL_CONDITION_FILE="$2"; shift 2 ;;
     --provider) require_value "$1" "${2-}"; export GDPVAL_PROVIDER="$2"; shift 2 ;;
     --model-type) require_value "$1" "${2-}"; export GDPVAL_MODEL_TYPE="$2"; shift 2 ;;
     --model) require_value "$1" "${2-}"; export GDPVAL_MODEL="$2"; shift 2 ;;
@@ -176,11 +181,6 @@ fi
 
 export GDPVAL_EXECUTOR="${GDPVAL_EXECUTOR:-stirrup}"
 
-if [[ "$GDPVAL_EXECUTOR" == stirrup && -n "${GDPVAL_EXECUTOR_TIMEOUT:-}" ]]; then
-  echo "--executor-timeout is not supported with --executor stirrup; omit it or use a local executor" >&2
-  exit 2
-fi
-
 if [[ "${GDPVAL_COMMAND:-run}" == aa-v2 ]]; then
   if [[ "$GDPVAL_EXECUTOR" != stirrup ]]; then
     echo "aa-v2 reproduction requires --executor stirrup" >&2
@@ -188,6 +188,10 @@ if [[ "${GDPVAL_COMMAND:-run}" == aa-v2 ]]; then
   fi
   if [[ -n "${GDPVAL_JUDGE_EXECUTOR:-}" ]]; then
     echo "aa-v2 reproduction does not accept --judge-executor" >&2
+    exit 2
+  fi
+  if [[ -n "${GDPVAL_CONDITION:-}" || -n "${GDPVAL_CONDITION_FILE:-}" ]]; then
+    echo "aa-v2 reproduction does not accept experiment-condition overrides" >&2
     exit 2
   fi
   if [[ -z "${GDPVAL_REFS:-}" ]]; then
@@ -199,6 +203,10 @@ if [[ "${GDPVAL_COMMAND:-run}" == aa-v2 ]]; then
 fi
 
 if [[ "${GDPVAL_COMMAND:-run}" == compare-runs ]]; then
+  if [[ -n "${GDPVAL_CONDITION:-}" || -n "${GDPVAL_CONDITION_FILE:-}" ]]; then
+    echo "compare-runs uses --label-a/--label-b; --condition is only for policy runs" >&2
+    exit 2
+  fi
   if [[ -z "${GDPVAL_RUN_A:-}" || -z "${GDPVAL_RUN_B:-}" ]]; then
     echo "compare-runs requires both --a and --b" >&2
     exit 2
@@ -264,6 +272,11 @@ if [[ "$GDPVAL_EXECUTOR" != stirrup ]]; then
     exit 2
   fi
   exec python3 -m gdpval_harness.local_runner run
+fi
+
+if [[ -n "${GDPVAL_CONDITION_FILE:-}" ]]; then
+  echo "--condition-file is currently supported only by local policy executors" >&2
+  exit 2
 fi
 
 "$PREFLIGHT"
