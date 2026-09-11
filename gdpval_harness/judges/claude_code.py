@@ -68,8 +68,7 @@ class ClaudeCodeJudgeExecutor(JudgeExecutor):
                 judge_executor=self.name,
                 ok=False,
                 details=(
-                    "native Windows Claude Code cannot be assumed to provide the OS-level Bash read confinement required "
-                    "for blind judging; use macOS, Linux, or WSL2",
+                    "native Windows Claude Code cannot provide the verified read confinement required for blind judging",
                 ),
             )
 
@@ -131,14 +130,22 @@ class ClaudeCodeJudgeExecutor(JudgeExecutor):
                     "Console/API, OAuth-token, gateway, Bedrock, Vertex, and Foundry modes are rejected",
                 ),
             )
+
+        # Blind judging requires an enforceable read boundary, not only a settings
+        # declaration. Claude Code currently exposes no documented non-model CLI
+        # probe that can prove denyRead/allowRead enforcement before the first
+        # subscription-backed model call. Fail closed rather than making a blind
+        # comparison claim on an unverified runtime. The policy executor remains
+        # available; only Claude-as-judge is disabled by this guard.
         return JudgePreflightResult(
             judge_executor=self.name,
-            ok=True,
+            ok=False,
             version=version,
             auth_mode=f"claude-subscription:{subscription_type}",
             details=(
                 f"Claude Code subscription login detected ({subscription_type})",
-                "Claude judge uses Bash-only OS sandboxing with root-deny/workspace-read confinement",
+                "Claude Code blind judging is disabled because filesystem read confinement cannot be verified "
+                "with a documented non-model preflight probe; use --judge-executor codex or human validation",
             ),
         )
 
@@ -249,8 +256,8 @@ class ClaudeCodeJudgeExecutor(JudgeExecutor):
             stderr_path=stderr_path,
             metadata={
                 "safe_mode": True,
-                "sandbox": "enabled-fail-closed/root-deny/workspace-read-only",
-                "read_confinement": "denyRead=/ + allowRead=anonymous-workspace",
+                "sandbox": "configured-but-not-preflight-verifiable",
+                "read_confinement": "not accepted for blind judging without a non-model runtime probe",
                 "tool_permission_mode": "Bash only; Read/Edit/Write disabled",
                 "network_policy": "strict-empty-allowlist",
                 "cloud_execution": False,
