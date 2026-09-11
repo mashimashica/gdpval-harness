@@ -48,6 +48,7 @@ def subscription_environment(base: Mapping[str, str] | None = None) -> dict[str,
 class CodexExecutor(Executor):
     name = "codex"
     invocation_mode = "codex exec"
+    tool_permission_mode = "workspace-write + approval_policy=never"
 
     def __init__(self, *, network_enabled: bool = False, command: str | None = None) -> None:
         self.network_enabled = network_enabled
@@ -149,12 +150,16 @@ class CodexExecutor(Executor):
             "--skip-git-repo-check",
             "--ignore-user-config",
             "-c",
+            'forced_login_method="chatgpt"',
+            "-c",
             'approval_policy="never"',
             "-c",
             f"sandbox_workspace_write.network_access={network}",
             "-c",
             "shell_environment_policy.ignore_default_excludes=false",
         ]
+        if not self.network_enabled:
+            command.extend(["-c", 'web_search="disabled"'])
         if request.model:
             command.extend(["--model", request.model])
         command.append("-")
@@ -223,11 +228,13 @@ class CodexExecutor(Executor):
             exit_code=exit_code,
             metadata={
                 "sandbox": "workspace-write",
-                "tool_permission_mode": "approval_policy=never",
+                "tool_permission_mode": self.tool_permission_mode,
                 "network_policy": "enabled" if self.network_enabled else "disabled",
+                "web_search": "default" if self.network_enabled else "disabled",
                 "cloud_execution": False,
                 "structured_output": "jsonl",
                 "session_persistence": "ephemeral",
+                "forced_login_method": "chatgpt",
                 "api_environment_removed": sorted(_API_ENV_VARS),
                 "command": command,
             },
