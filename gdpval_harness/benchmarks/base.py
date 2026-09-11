@@ -60,6 +60,11 @@ class Benchmark(ABC):
     def materialize(self, task: BenchmarkTask, workspace: Path) -> Sequence[str]:
         """Materialize benchmark-owned executor inputs into a task workspace."""
 
+    def execution_task(self, task: BenchmarkTask, workspace: Path, *, network_policy: str) -> TaskSpec:
+        """Build the executor-facing task after benchmark inputs have been materialized."""
+        del workspace, network_policy
+        return task.execution
+
     def evaluate(self, task: BenchmarkTask, result: ExecutionResult) -> BenchmarkEvaluation:
         """Evaluate one execution when the benchmark supports direct local evaluation."""
         raise NotImplementedError(f"{self.name} does not expose direct local evaluation through this adapter")

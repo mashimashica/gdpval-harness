@@ -1,0 +1,45 @@
+#!/usr/bin/env bash
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+set -euo pipefail
+
+ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)"
+cd "$ROOT"
+
+bash -n eval
+
+help="$(./eval --help)"
+grep -q 'benchmarks' <<<"$help"
+grep -q 'executors' <<<"$help"
+grep -q 'run' <<<"$help"
+
+benchmarks="$(./eval benchmarks)"
+grep -q '^aime26' <<<"$benchmarks"
+grep -q '^bigcodebench' <<<"$benchmarks"
+grep -q '^gdpval' <<<"$benchmarks"
+grep -q 'benchmark-native' <<<"$benchmarks"
+grep -q 'executable-tests' <<<"$benchmarks"
+grep -q 'llm-rubric' <<<"$benchmarks"
+
+executors="$(./eval executors)"
+grep -q '^codex' <<<"$executors"
+grep -q '^claude-code' <<<"$executors"
+grep -q '^cursor' <<<"$executors"
+grep -q '^stirrup' <<<"$executors"
+grep -q 'legacy ./gdpval path only' <<<"$executors"
+
+if ./eval run aime26 --executor claude-code --limit 1 >/dev/null 2>&1; then
+  echo "AIME26 unexpectedly accepted an unsupported executor" >&2
+  exit 1
+fi
+if ./eval run bigcodebench --executor stirrup --limit 1 >/dev/null 2>&1; then
+  echo "BigCodeBench unexpectedly accepted the legacy/API executor" >&2
+  exit 1
+fi
+if ./eval run aime26 --executor codex --limit 0 >/dev/null 2>&1; then
+  echo "generic eval unexpectedly accepted a non-positive limit" >&2
+  exit 1
+fi
+
+printf 'generic eval CLI self-test passed\n'

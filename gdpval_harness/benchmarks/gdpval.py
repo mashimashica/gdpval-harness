@@ -33,6 +33,14 @@ def _is_inside(root: Path, path: Path) -> bool:
         return False
 
 
+def _reference_listing(workspace: Path) -> str:
+    ref_root = workspace / "reference_files"
+    if not ref_root.is_dir():
+        return "None"
+    files = [str(path.relative_to(workspace)) for path in sorted(ref_root.rglob("*")) if path.is_file()]
+    return "\n".join(f"- {item}" for item in files) if files else "None"
+
+
 class GDPvalBenchmark(Benchmark):
     name = "gdpval"
     # The current upstream prepare script loads openai/gdpval without a pinned
@@ -107,3 +115,25 @@ class GDPvalBenchmark(Benchmark):
                     f"task {task.execution.task_id}: unsafe or missing materialized reference path: {relative}"
                 )
         return downloaded
+
+    def execution_task(self, task: BenchmarkTask, workspace: Path, *, network_policy: str) -> TaskSpec:
+        prompt = f"""You are completing a GDPval professional-work task in an isolated local workspace.
+
+Work only on this task. Do not create, hand off, or continue the task in any cloud/background agent.
+Use only tools actually available in this local runtime; do not assume packages or system tools are installed.
+
+Reference files, when provided, are under the current workspace:
+{_reference_listing(workspace)}
+
+Final deliverables contract:
+- Put every file that should be submitted for evaluation under ./deliverables/.
+- Create ./deliverables/ if needed.
+- Nested files and directories under ./deliverables/ are allowed.
+- Keep scratch files, logs, caches, helper scripts, and executor metadata out of ./deliverables/.
+- Do not modify the reference_files directory.
+- Network policy for model-generated tools: {network_policy}.
+
+Task:
+{task.execution.prompt}
+"""
+        return TaskSpec(task_id=task.execution.task_id, prompt=prompt)

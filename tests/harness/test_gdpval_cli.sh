@@ -8,9 +8,11 @@ ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$ROOT"
 
 bash -n gdpval
+bash -n eval
 bash -n scripts/gdpval_provider.sh
 bash -n scripts/gdpval_preflight.sh
 bash -n tests/harness/test_experiment_conditions.sh
+bash -n tests/harness/test_eval_cli.sh
 bash -n nemotron_recipes/lightning-3.5/instruct/gym/gdpval/gdpval.sh
 
 help="$(./gdpval --help)"
@@ -63,14 +65,17 @@ trap 'rm -rf "$pycache"' EXIT
 PYTHONPYCACHEPREFIX="$pycache" python3 -m py_compile \
   scripts/gdpval_run_metadata.py \
   gdpval_harness/__init__.py \
+  gdpval_harness/cli.py \
   gdpval_harness/layout.py \
   gdpval_harness/local_runner.py \
   gdpval_harness/local_judge_runner.py \
+  gdpval_harness/runner.py \
   gdpval_harness/benchmarks/__init__.py \
   gdpval_harness/benchmarks/base.py \
   gdpval_harness/benchmarks/aime26.py \
   gdpval_harness/benchmarks/bigcodebench.py \
   gdpval_harness/benchmarks/gdpval.py \
+  gdpval_harness/benchmarks/registry.py \
   gdpval_harness/executors/__init__.py \
   gdpval_harness/executors/base.py \
   gdpval_harness/executors/claude_code.py \
@@ -88,5 +93,6 @@ bash tests/harness/test_claude_code_executor.sh
 bash tests/harness/test_cursor_executor.sh
 bash tests/harness/test_local_judge_executor.sh
 bash tests/harness/test_experiment_conditions.sh
+bash tests/harness/test_eval_cli.sh
 
 printf 'gdpval harness self-test passed\n'
