@@ -95,7 +95,7 @@ class CodexJudgeExecutor(JudgeExecutor):
                 allowed.write_text("allowed\n", encoding="utf-8")
                 denied.write_text("must-not-be-readable\n", encoding="utf-8")
 
-                command = [self.policy.command]
+                command = [self.policy.command, "-c", 'forced_login_method="chatgpt"', "-c", 'web_search="disabled"']
                 command.extend(_profile_overrides(workspace))
                 command.extend(
                     [
@@ -222,6 +222,10 @@ class CodexJudgeExecutor(JudgeExecutor):
             "--skip-git-repo-check",
             "--ignore-user-config",
             "-c",
+            'forced_login_method="chatgpt"',
+            "-c",
+            'web_search="disabled"',
+            "-c",
             'approval_policy="never"',
         ]
         command.extend(_profile_overrides(request.workspace))
@@ -299,6 +303,8 @@ class CodexJudgeExecutor(JudgeExecutor):
                 "sandbox": "permission-profile/root-deny/workspace-read-only",
                 "read_confinement": "root-deny + minimal-read + anonymous-workspace-read",
                 "network_policy": "disabled by permission profile",
+                "web_search": "disabled",
+                "forced_login_method": "chatgpt",
                 "cloud_execution": False,
                 "parse_error": parse_error,
             },
