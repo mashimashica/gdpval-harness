@@ -114,9 +114,10 @@ def matched_tasks(candidate_a: Path, candidate_b: Path) -> list[tuple[str, Path,
     return [(name, tasks_a[name], tasks_b[name]) for name in sorted(tasks_a)]
 
 
-def _normalize_file_metadata(source: Path, destination: Path) -> None:
-    executable = bool(source.stat().st_mode & 0o111)
-    destination.chmod(0o555 if executable else 0o444)
+def _normalize_file_metadata(destination: Path) -> None:
+    # Anonymous judging is read-only. Normalize every staged file to one mode
+    # so source runtime/umask/executable bits cannot act as candidate identity.
+    destination.chmod(0o444)
     os.utime(destination, ns=(_NORMALIZED_MTIME_NS, _NORMALIZED_MTIME_NS), follow_symlinks=False)
 
 
@@ -143,11 +144,10 @@ def _copy_tree(source: Path, target: Path, *, submission: bool = False) -> None:
             destination.mkdir(parents=True, exist_ok=True)
         elif path.is_file():
             destination.parent.mkdir(parents=True, exist_ok=True)
-            # copyfile preserves bytes but deliberately does not preserve source
-            # ownership, timestamps, xattrs, or mode bits. Reintroduce only the
-            # executable/non-executable semantic using a canonical mode below.
+            # copyfile preserves bytes while deliberately not copying source
+            # metadata such as timestamps, xattrs, ownership, or permissions.
             shutil.copyfile(path, destination)
-            _normalize_file_metadata(path, destination)
+            _normalize_file_metadata(destination)
     _normalize_directories(target)
 
 
