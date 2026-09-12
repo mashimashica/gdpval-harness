@@ -3,12 +3,12 @@
 
 from __future__ import annotations
 
-import json
 import subprocess
 import sys
 from pathlib import Path
 
 from eval_harness.benchmarks.base import Benchmark, BenchmarkTask
+from eval_harness.benchmarks.snapshot import Availability, SnapshotTaskContent, _decode_json_object
 from eval_harness.executors.base import TaskSpec
 
 
@@ -19,8 +19,11 @@ _MATH_PROMPT = (
 
 class AIME26Benchmark(Benchmark):
     name = "aime26"
+    source = "huggingface:MathArena/aime_2026/train"
+    source_availability = Availability.AVAILABLE
     # Upstream prepare.py currently loads MathArena/aime_2026 without a pinned dataset revision.
     revision = None
+    revision_availability = Availability.UNAVAILABLE
 
     def __init__(self, *, root: Path, dataset_path: Path, prepare_script: Path) -> None:
         self.root = root
@@ -29,6 +32,9 @@ class AIME26Benchmark(Benchmark):
 
     def is_prepared(self) -> bool:
         return self.dataset_path.is_file()
+
+    def snapshot_source_paths(self) -> tuple[Path, ...]:
+        return (self.dataset_path,)
 
     def prepare(self) -> None:
         if self.is_prepared():
@@ -47,8 +53,11 @@ class AIME26Benchmark(Benchmark):
             for index, line in enumerate(handle, start=1):
                 if not line.strip():
                     continue
-                row = json.loads(line)
-                question = str(row["question"])
+                row = _decode_json_object(line, label="AIME26 dataset row")
+                question = row.get("question")
+                expected_answer = row.get("expected_answer")
+                if type(question) is not str or type(expected_answer) not in {str, int}:
+                    raise RuntimeError("AIME26 task fields have invalid types")
                 tasks.append(
                     BenchmarkTask(
                         execution=TaskSpec(
@@ -57,7 +66,7 @@ class AIME26Benchmark(Benchmark):
                         ),
                         evaluation={
                             "question": question,
-                            "expected_answer": str(row["expected_answer"]),
+                            "expected_answer": str(expected_answer),
                         },
                     )
                 )
@@ -71,3 +80,11 @@ class AIME26Benchmark(Benchmark):
         del task
         workspace.mkdir(parents=True, exist_ok=True)
         return []
+
+    def snapshot_task(self, task: BenchmarkTask, workspace: Path) -> SnapshotTaskContent:
+        del workspace
+        if set(task.evaluation) != {"question", "expected_answer"}:
+            raise ValueError("AIME26 evaluation metadata is invalid")
+        return SnapshotTaskContent(
+            evaluation_data=dict(task.evaluation),
+        )
