@@ -186,9 +186,9 @@ dependencies = [
     "scipy>=1.14.1",
 
     # aiohttp: async http backend
-    # Updated Sun Jun 29, 2026 with aiohttp>=3.14.1 (CVE mitigation)
-    # License: Apache 2.0 https://github.com/aio-libs/aiohttp/blob/9a2f146a12e3525b43e96723ef41584bf9cf784e/LICENSE.txt
-    "aiohttp>=3.14.1",
+    # Updated Sat Sep 12, 2026 with aiohttp>=3.14.3 (CVE mitigation)
+    # License: Apache 2.0 https://github.com/aio-libs/aiohttp/blob/v3.14.3/LICENSE.txt
+    "aiohttp>=3.14.3",
 
     # yappi: profiling tool
     # Updated Wed Aug 12, 2026 with yappi==1.7.6 for CPython 3.14 support
@@ -206,19 +206,36 @@ dependencies = [
     "psutil",
 
     # HuggingFace datasets: for loading and converting parquet datasets
-    # Updated Thu Dec 04, 2025 with datasets==4.4.1
-    # License: Apache 2.0 https://github.com/huggingface/datasets/blob/main/LICENSE
+    # Updated Sat Sep 12, 2026 with datasets==5.0.1 in the lock (CVE mitigation). The
+    # requirement stays unpinned because resources_servers/equivalence_llm_judge pins
+    # datasets==4.0.0 in its isolated server environment.
+    # License: Apache 2.0 https://github.com/huggingface/datasets/blob/5.0.1/LICENSE
     "datasets",
 
     # orjson: JSON library for faster serialization/deserialization
-    # Updated: Thu Jan 08, 2026 with orjson==3.11.3
-    # License: Apache 2.0 https://github.com/ijl/orjson/blob/fb3eb1f729c7e7b019f780af5695722c99c7c695/LICENSE-APACHE
-    "orjson",
+    # Updated: Sat Sep 12, 2026 with orjson>=3.11.6 (security floor)
+    # License: Apache 2.0 https://github.com/ijl/orjson/blob/3.11.6/LICENSE-APACHE
+    "orjson>=3.11.6",
 
     # urllib3: HTTP client library (transitive dependency, pinned for security)
     # Updated: Mon May 19, 2026 with urllib3>=2.7.0
     # License: MIT https://github.com/urllib3/urllib3/blob/main/LICENSE.txt
     "urllib3>=2.7.0",
+
+    # filelock: File locking used by datasets and virtualenv (transitive dependency, pinned for security)
+    # Updated: Sat Sep 12, 2026 with filelock>=3.20.3 (security floor)
+    # License: The Unlicense https://github.com/tox-dev/filelock/blob/3.20.3/LICENSE
+    "filelock>=3.20.3",
+
+    # idna: Internationalized domain name handling used by HTTP clients (transitive dependency, pinned for security)
+    # Updated: Sat Sep 12, 2026 with idna>=3.15 (security floor)
+    # License: BSD 3-Clause https://github.com/kjd/idna/blob/v3.15/LICENSE.md
+    "idna>=3.15",
+
+    # msgpack: MessagePack serialization used by Ray (transitive dependency, pinned for security)
+    # Updated: Sat Sep 12, 2026 with msgpack>=1.2.1 (security floor)
+    # License: Apache 2.0 https://github.com/msgpack/msgpack-python/blob/1.2.1/COPYING
+    "msgpack>=1.2.1",
 
     # sqlparse: SQL parsing library (transitive dependency of mlflow-skinny, pinned for security)
     # mlflow-skinny only requires sqlparse<1,>=0.4.0, so it won't pull the fixed version on its own.
@@ -232,9 +249,14 @@ dependencies = [
     "fonttools>=4.60.2",
 
     # python-multipart: Streaming multipart parser (transitive dependency, pinned for security)
-    # Updated: Mon Feb 10, 2026 with python-multipart>=0.0.22
-    # License: Apache 2.0 https://github.com/andrew-d/python-multipart/blob/master/LICENSE.txt
-    "python-multipart>=0.0.22",
+    # Updated: Sat Sep 12, 2026 with python-multipart>=0.0.31 (security floor)
+    # License: Apache 2.0 https://github.com/Kludex/python-multipart/blob/0.0.31/LICENSE.txt
+    "python-multipart>=0.0.31",
+
+    # virtualenv: Isolated environments used by pre-commit and Ray (transitive dependency, pinned for security)
+    # Updated: Sat Sep 12, 2026 with virtualenv>=20.36.1 (security floor)
+    # License: MIT https://github.com/pypa/virtualenv/blob/20.36.1/LICENSE.txt
+    "virtualenv>=20.36.1",
 
     # pyarrow: columnar data library (transitive dependency via mlflow, pinned for security)
     # mlflow caps pyarrow<25; versions >=23.0.1 have cp313 wheels and address use-after-free.
@@ -370,17 +392,22 @@ dev = [
     # Pre-commit: Used for pre-commit hooks.
     # Updated: Thu Sep 04, 2025 with pre-commit==4.3.0
     # License: MIT https://github.com/pre-commit/pre-commit/blob/e70b313c8017b2b6d7844e91795c9d41b9ceb9fb/LICENSE
-    "pre-commit>=3.6.0",
+    "pre-commit==4.3.0",
 
     # Mypy: Used for Python type checking.
     # Updated: Thu Sep 04, 2025 with mypy==1.17.1
     # License: MIT https://github.com/python/mypy/blob/645b421fa23a3f0d63f651059fa1e8318a6f214a/LICENSE
-    "mypy>=1.8.0",
+    "mypy==1.17.1",
+
+    # types-PyYAML: Type stubs for the PyYAML manifest parser used by the GDPval Agent Skill intervention.
+    # Updated: Mon Sep 15, 2025 with types-PyYAML==6.0.12.20250915
+    # License: Apache-2.0 https://github.com/python/typeshed/blob/main/LICENSE
+    "types-PyYAML==6.0.12.20250915",
 
     # Ruff: Used for Python code formatting and linting.
-    # Updated: Fri Jul 25, 2025 with ruff==0.12.5
+    # Updated: Thu Aug 28, 2025 with ruff==0.12.11
     # License: MIT https://github.com/astral-sh/ruff/blob/21ac16db85452c2c196d3b9cc61fb27b7b81f3f7/LICENSE
-    "ruff",
+    "ruff==0.12.11",
 
     # Coverage: Used for Python code coverage.
     # Updated: Fri Jul 25, 2025 with coverage[toml]==7.10.0
@@ -424,6 +451,22 @@ codec = [
 [build-system]
 requires = ["setuptools>=61", "setuptools-scm"]
 build-backend = "setuptools.build_meta"
+
+[tool.mypy]
+python_version = "3.13"
+strict = true
+explicit_package_bases = true
+follow_imports = "silent"
+files = [
+    "gdpval_harness",
+    "scripts/ci/run_gdpval_harness_coverage.py",
+    "scripts/gdpval_run_metadata.py",
+    "scripts/update_env_list.py",
+    "tests/harness",
+    "tests/test_update_env_list.py",
+    "tests/unit_tests/test_update_env_list.py",
+    "tests/unit_tests/test_hf_utils.py",
+]
 
 [tool.uv]
 managed = true
@@ -763,9 +806,11 @@ select = [
     "F401",  # imported but unused
     "E741",  # ambiguous variable name
     "F821",  # undefined name
-    "E266",  # too many leading '#' for block comment
     "I",     # isort
 ]
+
+# E266 is preview-only in the pinned Ruff release; leave it unselected to avoid
+# changing the existing section-comment style across the upstream tree.
 
 # Additional rules can be added here
 ignore = [

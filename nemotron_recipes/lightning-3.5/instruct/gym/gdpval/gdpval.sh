@@ -27,6 +27,8 @@
 #   nemotron_recipes/lightning-3.5/instruct/gym/gdpval/gdpval.sh                         # full benchmark (220 tasks x 1)
 #   LIMIT=3 nemotron_recipes/lightning-3.5/instruct/gym/gdpval/gdpval.sh                 # quick smoke
 #   OUT=<dir> PARALLEL=<n> nemotron_recipes/lightning-3.5/instruct/gym/gdpval/gdpval.sh  # output dir, concurrency
+#   GDPVAL_MODEL_TYPE=<type> .../gdpval.sh                                               # alternate Gym model type
+#   GDPVAL_MODEL=<id> GDPVAL_BASE_URL=<url> .../gdpval.sh                               # policy target overrides
 #
 # Scores each deliverable against its rubric. Comparison mode instead scores against
 # reference deliverables you generate yourself, one subdirectory per reference model;
@@ -34,10 +36,6 @@
 #
 # Note: PARALLEL is applied twice on purpose — the agent caps its own concurrent runs
 # at 32 regardless of --concurrency, so raising only one of them does nothing.
-
-# Used judges: Gym's default panel — GPT-5.5, Gemini 3.1 Pro and Claude Opus 4.8,
-# one sampled per call. All three route through gdpval_judge_model in env.yaml, so
-# that endpoint has to serve every one of them.
 
 # JUDGE_ONLY re-scores existing deliverables without running the agent, so it
 # needs neither the sandbox nor a search key.
@@ -52,49 +50,84 @@ fi
 STIR=gdpval_stirrup_agent.responses_api_agents.stirrup_agent
 GDR=gdpval_resources_server.resources_servers.gdpval
 JUDGE=gdpval_judge_model.responses_api_models.openai_model
-POLICY=policy_model.responses_api_models.vllm_model
+MODEL_TYPE="${GDPVAL_MODEL_TYPE:-vllm_model}"
 
-# Absolute path required. A comparison run points GDPVAL_REFS at one of these.
+MODEL_OVR=()
+if [ -n "${GDPVAL_BASE_URL:-}" ]; then
+  MODEL_OVR+=("++policy_base_url=$GDPVAL_BASE_URL")
+fi
+if [ -n "${GDPVAL_MODEL:-}" ]; then
+  MODEL_OVR+=("++policy_model_name=$GDPVAL_MODEL")
+fi
+if [ -n "${GDPVAL_API_KEY:-}" ]; then
+  MODEL_OVR+=('++policy_api_key=${oc.env:GDPVAL_API_KEY}')
+fi
+
+if [ "$MODEL_TYPE" = "vllm_model" ]; then
+  POLICY=policy_model.responses_api_models.vllm_model
+  MODEL_OVR+=("++$POLICY.chat_template_kwargs={enable_thinking: true}"
+              "++$POLICY.extra_body={skip_special_tokens: false}"
+              "++$POLICY.sequential_reasoning_allowed=false")
+fi
+
 DELIVERABLES="${PERSIST_DELIVERABLES_DIR:-$(realpath -m "${OUT:-./results/gdpval}/deliverables")}"
-
-# Reference ELOs — the Artificial Analysis GDPval-AA v2 ratings the published figures
-# were fitted against. A reference set is a subdirectory of GDPVAL_REFS named after one
-# of these keys; supply as many as you have. Comparing against several opponents of
-# known rating is what puts the result on the published scale — a single opponent only
-# fixes an arbitrary offset.
-#
-# Pinned on purpose, and they no longer match the live board. These anchors define the
-# scale, so refreshing them moves your score off the one the published figures sit on.
-REF_ELOS="deepseek_v4_pro=1307 glm51_fp8=1257 kimi_k26=1191 nemotron3_ultra=1164
-          qwen36_35b=1049 qwen35_397b=962 gptoss_120b=799 gemma4_26b=761
-          qwen3_30b_thinking=308"
+REFERENCE_MANIFEST="${GDPVAL_REFERENCE_MANIFEST:-config/gdpval-aa-v2-references.tsv}"
 
 MODE="${GDPVAL_REWARD_MODE:-rubric}"
 [ "$MODE" = rubric ] || [ "$MODE" = comparison ] ||
   { echo "GDPVAL_REWARD_MODE must be rubric or comparison (got '$MODE')" >&2; exit 1; }
 
-MODE_OVR=()   # rubric is the config default and needs nothing added
-if [ "$MODE" = comparison ]; then
+JUDGE_OVR=()
+case "${GDPVAL_JUDGE_PANEL:-aa-v2}" in
+  aa-v2) ;;
+  single)
+    JUDGE_OVR+=("++$GDR.judge_panel=null")
+    if [ -n "${GDPVAL_JUDGE_MODEL:-}" ]; then
+      JUDGE_OVR+=("++$GDR.judge_responses_create_params_overrides.model=$GDPVAL_JUDGE_MODEL")
+    fi
+    ;;
+  *)
+    echo "GDPVAL_JUDGE_PANEL must be aa-v2 or single" >&2
+    exit 2
+    ;;
+esac
+
+MODE_OVR=()
+if [ "$MODE" = comparison ] && [ -n "${GDPVAL_SINGLE_REFERENCE_DIR:-}" ]; then
+  MODE_OVR=("++$GDR.reward_mode=comparison"
+            "++$GDR.reference_deliverables_dir=$GDPVAL_SINGLE_REFERENCE_DIR"
+            "++$GDR.reference_elo=${GDPVAL_SINGLE_REFERENCE_ELO:-1000}")
+  echo "gdpval: comparison against one unrated experiment reference" >&2
+elif [ "$MODE" = comparison ]; then
   GDPVAL_REFS="${GDPVAL_REFS:?export GDPVAL_REFS (dir of reference deliverables)}"
+  [ -r "$REFERENCE_MANIFEST" ] || {
+    echo "reference manifest not readable: $REFERENCE_MANIFEST" >&2
+    exit 1
+  }
   MODE_OVR=("++$GDR.reward_mode=comparison")
   found=0
+  expected=()
 
-  for kv in $REF_ELOS; do
-    name="${kv%%=*}"
+  while IFS=$'\t ' read -r name elo _; do
+    [ -z "${name:-}" ] && continue
+    [[ "$name" == \#* ]] && continue
+    if [ -z "${elo:-}" ]; then
+      echo "invalid reference manifest row for '$name': missing Elo" >&2
+      exit 1
+    fi
+    expected+=("$name")
     [ -d "$GDPVAL_REFS/$name" ] || continue
     MODE_OVR+=("++$GDR.reference_models.$name.deliverables_dir=$GDPVAL_REFS/$name"
-               "++$GDR.reference_models.$name.elo=${kv##*=}")
+               "++$GDR.reference_models.$name.elo=$elo")
     found=$((found + 1))
-  done
+  done < "$REFERENCE_MANIFEST"
 
   if [ "$found" -eq 0 ]; then
     echo "no reference sets found in $GDPVAL_REFS. Expected subdirectories named:" >&2
-    for kv in $REF_ELOS; do echo "  ${kv%%=*}" >&2; done
+    for name in "${expected[@]}"; do echo "  $name" >&2; done
     exit 1
   fi
 
-  # Two or more opponents: stage 1 places the model, stage 2 spends the full task
-  # budget on the nearest of them. With one there is nothing to narrow to.
   if [ "$found" -ge 2 ]; then
     MODE_OVR+=("++multistage.enabled=true"
                "++multistage.stages=[{num_tasks: 45}, {num_models: $((found < 4 ? found : 4))}]")
@@ -103,22 +136,18 @@ if [ "$MODE" = comparison ]; then
   echo "gdpval: comparison against $found rated reference(s)" >&2
 fi
 
-# Pin Gym to the commit the tech report numbers were produced with. Set PIN_GYM=0 to
-# run against your current checkout instead. `nemotron_recipes` is excluded, so this
-# never touches the recipe that is running, and HEAD does not move. Undo the pin with
-# `git restore .` from the repo root.
 GYM_PIN="${GYM_PIN:-57c15a22f8b82d3d859b71468fe3329f4e2093b4}"
-if [ "${PIN_GYM:-1}" != 0 ]; then
+if [ "${PIN_GYM:-0}" != 0 ]; then
   git rev-parse --verify -q "$GYM_PIN^{commit}" >/dev/null 2>&1 || git fetch origin "$GYM_PIN"
   git restore --source="$GYM_PIN" -- . ':(exclude)nemotron_recipes' || exit 1
-  echo "pinned Gym to $GYM_PIN (recipes untouched; PIN_GYM=0 to skip; git restore . to undo)"
+  echo "pinned Gym to $GYM_PIN (recipes untouched; set PIN_GYM=0 to skip; git restore . to undo)"
 fi
 
 gym eval prepare --benchmark gdpval
 
 gym eval run \
   --benchmark gdpval \
-  --model-type vllm_model \
+  --model-type "$MODEL_TYPE" \
   --split benchmark \
   ${RESUME:+--resume} \
   --output "${OUT:-./results/gdpval}/evaluator_rollouts.jsonl" \
@@ -130,9 +159,8 @@ gym eval run \
   "++$JUDGE.max_concurrent_requests=10" \
   ${PARALLEL:+"++$STIR.concurrency=$PARALLEL"} \
   ${MODE_OVR[@]+"${MODE_OVR[@]}"} \
-  "++$POLICY.chat_template_kwargs={enable_thinking: true}" \
-  "++$POLICY.extra_body={skip_special_tokens: false}" \
-  "++$POLICY.sequential_reasoning_allowed=false" \
+  ${JUDGE_OVR[@]+"${JUDGE_OVR[@]}"} \
+  "${MODEL_OVR[@]}" \
   "++overwrite_metrics_conflicts=true" \
   ${LIMIT:+--limit "$LIMIT"} \
   ${PARALLEL:+--concurrency "$PARALLEL"}

@@ -4,7 +4,7 @@
 from scripts.update_env_list import visit_agent_datasets
 
 
-def _agent_config(train_dataset: dict) -> dict:
+def _agent_config(train_dataset: dict[str, object]) -> dict[str, object]:
     return {
         "test_agent": {
             "responses_api_agents": {

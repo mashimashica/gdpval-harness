@@ -1,0 +1,305 @@
+#!/usr/bin/env bash
+# SPDX-FileCopyrightText: Copyright (c) 2026, NVIDIA CORPORATION. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+set -euo pipefail
+
+usage() {
+  cat <<'USAGE'
+Usage:
+  ./gdpval run [options]
+  ./gdpval check [options]
+  ./gdpval aa-v2 --refs DIR [options]
+  ./gdpval compare-runs --a DIR --b DIR [options]
+  ./gdpval providers
+  ./gdpval executors
+
+`run` is the default when the first argument is an option.
+
+Core options:
+  --limit N             Run/judge only N tasks
+  --out DIR             Output directory
+  --parallel N          Evaluator and agent concurrency
+  --executor NAME       Policy agent runtime (default: stirrup)
+  --executor-timeout S  Per-task timeout for local executors; rejected by Stirrup
+  --executor-network MODE
+                        Local policy tool network: disabled (default) or enabled
+  --condition LABEL     Generic experiment-condition label (metadata only)
+  --condition-file FILE Additional instructions for local policy executors
+  --provider NAME       Policy provider preset for executor=stirrup
+  --model-type TYPE     Gym response model type for executor=stirrup
+  --model MODEL         Policy/local-executor model ID when supported
+  --reasoning-effort VALUE
+                        Requested Codex policy reasoning effort: minimal, low, medium, high, xhigh, or max
+  --base-url URL        Policy model base URL for executor=stirrup
+
+Judge options:
+  --judge-executor NAME Local subscription judge: codex; claude-code fails closed until read confinement is verifiable
+  --judge-trials N      Local blind judge trials per task (default: 2)
+  --judge-timeout S     Local judge wall-clock timeout per trial (default: 3600)
+  --judge-panel MODE    API judge mode: aa-v2 (default) or single
+  --judge-model MODEL   Judge model ID when selectable
+  --judge-reasoning-effort VALUE
+                        Requested Codex local-judge reasoning effort: minimal, low, medium, high, xhigh, or max
+  --judge-base-url URL  API judge gateway base URL
+  --judge-seed N        Deterministic judge/swap seed
+
+Evaluation options:
+  --rubric              Score against GDPval rubrics (default)
+  --comparison DIR      Compare against rated reference deliverables
+  --reference-manifest FILE
+                        Reference names and Elo anchors
+  --refs DIR            Reference directory for the `aa-v2` command
+  --aa-v2 DIR           Legacy alias for `aa-v2 --refs DIR`
+  --judge-only          Re-score existing deliverables through the API judge path
+  --resume              Resume an interrupted run
+  --pin-gym             Opt in to NVIDIA's pinned Gym revision
+
+compare-runs options:
+  --a DIR               Candidate A deliverables
+  --b DIR               Candidate B deliverables
+  --label-a LABEL       Metadata label for candidate A
+  --label-b LABEL       Metadata label for candidate B
+
+Other:
+  --check               Legacy alias for the `check` command
+  --no-metadata         Do not write run-metadata.json
+  -h, --help            Show this help
+
+Executor, provider, condition, and judge are separate concepts. `--condition`
+is an arbitrary provenance label and has no built-in semantics. `--condition-file`
+is the generic local-executor intervention surface; ALPS or any other method can
+be supplied externally without being hard-coded into the GDPval core.
+USAGE
+}
+
+export GDPVAL_COMMAND=run
+case "${1-}" in
+  run) shift ;;
+  check) export GDPVAL_COMMAND=check GDPVAL_CHECK_ONLY=1; shift ;;
+  aa-v2) export GDPVAL_COMMAND=aa-v2; shift ;;
+  compare-runs) export GDPVAL_COMMAND=compare-runs; shift ;;
+  providers) export GDPVAL_COMMAND=providers; shift ;;
+  executors) export GDPVAL_COMMAND=executors; shift ;;
+esac
+
+require_value() {
+  local option="$1"
+  local value="${2-}"
+  if [[ -z "$value" ]]; then
+    echo "$option requires a value" >&2
+    exit 2
+  fi
+}
+
+while (( $# )); do
+  case "$1" in
+    --limit) require_value "$1" "${2-}"; export LIMIT="$2"; shift 2 ;;
+    --out) require_value "$1" "${2-}"; export OUT="$2"; shift 2 ;;
+    --parallel) require_value "$1" "${2-}"; export PARALLEL="$2"; shift 2 ;;
+    --executor) require_value "$1" "${2-}"; export GDPVAL_EXECUTOR="$2"; shift 2 ;;
+    --executor-timeout) require_value "$1" "${2-}"; export GDPVAL_EXECUTOR_TIMEOUT="$2"; shift 2 ;;
+    --executor-network) require_value "$1" "${2-}"; export GDPVAL_EXECUTOR_NETWORK="$2"; shift 2 ;;
+    --condition) require_value "$1" "${2-}"; export GDPVAL_CONDITION="$2"; shift 2 ;;
+    --condition-file) require_value "$1" "${2-}"; export GDPVAL_CONDITION_FILE="$2"; shift 2 ;;
+    --provider) require_value "$1" "${2-}"; export GDPVAL_PROVIDER="$2"; shift 2 ;;
+    --model-type) require_value "$1" "${2-}"; export GDPVAL_MODEL_TYPE="$2"; shift 2 ;;
+    --model) require_value "$1" "${2-}"; export GDPVAL_MODEL="$2"; shift 2 ;;
+    --reasoning-effort) require_value "$1" "${2-}"; export GDPVAL_REASONING_EFFORT="$2"; shift 2 ;;
+    --base-url) require_value "$1" "${2-}"; export GDPVAL_BASE_URL="$2"; shift 2 ;;
+    --judge-executor) require_value "$1" "${2-}"; export GDPVAL_JUDGE_EXECUTOR="$2"; shift 2 ;;
+    --judge-trials) require_value "$1" "${2-}"; export GDPVAL_JUDGE_TRIALS="$2"; shift 2 ;;
+    --judge-timeout) require_value "$1" "${2-}"; export GDPVAL_JUDGE_TIMEOUT="$2"; shift 2 ;;
+    --judge-panel) require_value "$1" "${2-}"; export GDPVAL_JUDGE_PANEL="$2"; shift 2 ;;
+    --judge-model) require_value "$1" "${2-}"; export GDPVAL_JUDGE_MODEL="$2"; shift 2 ;;
+    --judge-reasoning-effort) require_value "$1" "${2-}"; export GDPVAL_JUDGE_REASONING_EFFORT="$2"; shift 2 ;;
+    --judge-base-url) require_value "$1" "${2-}"; export GDPVAL_JUDGE_BASE_URL="$2"; shift 2 ;;
+    --judge-seed) require_value "$1" "${2-}"; export JUDGE_SAMPLING_SEED="$2"; shift 2 ;;
+    --judge-only) export JUDGE_ONLY=true; shift ;;
+    --rubric) export GDPVAL_REWARD_MODE=rubric; shift ;;
+    --comparison)
+      require_value "$1" "${2-}"
+      export GDPVAL_REWARD_MODE=comparison GDPVAL_REFS="$2"
+      shift 2
+      ;;
+    --reference-manifest) require_value "$1" "${2-}"; export GDPVAL_REFERENCE_MANIFEST="$2"; shift 2 ;;
+    --refs) require_value "$1" "${2-}"; export GDPVAL_REFS="$2"; shift 2 ;;
+    --aa-v2)
+      require_value "$1" "${2-}"
+      export GDPVAL_COMMAND=aa-v2 GDPVAL_REFS="$2"
+      shift 2
+      ;;
+    --resume) export RESUME=1; shift ;;
+    --pin-gym) export PIN_GYM=1; shift ;;
+    --check) export GDPVAL_COMMAND=check GDPVAL_CHECK_ONLY=1; shift ;;
+    --a) require_value "$1" "${2-}"; export GDPVAL_RUN_A="$2"; shift 2 ;;
+    --b) require_value "$1" "${2-}"; export GDPVAL_RUN_B="$2"; shift 2 ;;
+    --label-a) require_value "$1" "${2-}"; export GDPVAL_LABEL_A="$2"; shift 2 ;;
+    --label-b) require_value "$1" "${2-}"; export GDPVAL_LABEL_B="$2"; shift 2 ;;
+    --no-metadata) export GDPVAL_WRITE_METADATA=0; shift ;;
+    -h|--help) usage; exit 0 ;;
+    *) echo "unknown option: $1" >&2; usage >&2; exit 2 ;;
+  esac
+done
+
+ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+PROVIDERS="$ROOT/scripts/gdpval_provider.sh"
+PREFLIGHT="$ROOT/scripts/gdpval_preflight.sh"
+METADATA="$ROOT/scripts/gdpval_run_metadata.py"
+RECIPE="$ROOT/nemotron_recipes/lightning-3.5/instruct/gym/gdpval/gdpval.sh"
+AA_V2_MANIFEST="$ROOT/config/gdpval-aa-v2-references.tsv"
+
+cd "$ROOT"
+
+if [[ "${GDPVAL_COMMAND:-run}" == executors ]]; then
+  python3 -m gdpval_harness.executors.registry
+  exit 0
+fi
+
+if [[ ! -f "$PROVIDERS" ]]; then
+  echo "GDPval provider helper not found: $PROVIDERS" >&2
+  exit 1
+fi
+# shellcheck source=scripts/gdpval_provider.sh
+source "$PROVIDERS"
+
+if [[ "${GDPVAL_COMMAND:-run}" == providers ]]; then
+  gdpval_list_providers
+  exit 0
+fi
+
+if [[ ! -x "$PREFLIGHT" || ! -f "$METADATA" || ! -f "$RECIPE" ]]; then
+  echo "GDPval harness support files are incomplete" >&2
+  exit 1
+fi
+
+export GDPVAL_EXECUTOR="${GDPVAL_EXECUTOR:-stirrup}"
+
+if [[ -n "${GDPVAL_REASONING_EFFORT:-}" && "$GDPVAL_EXECUTOR" != codex ]]; then
+  echo "--reasoning-effort is only valid with --executor codex" >&2
+  exit 2
+fi
+if [[ -n "${GDPVAL_JUDGE_REASONING_EFFORT:-}" && "${GDPVAL_JUDGE_EXECUTOR:-}" != codex ]]; then
+  echo "--judge-reasoning-effort requires --judge-executor codex" >&2
+  exit 2
+fi
+
+if [[ "$GDPVAL_EXECUTOR" == stirrup && -n "${GDPVAL_EXECUTOR_TIMEOUT:-}" ]]; then
+  echo "--executor-timeout is not supported with --executor stirrup; omit it or use a local executor" >&2
+  exit 2
+fi
+
+if [[ "${GDPVAL_COMMAND:-run}" == aa-v2 ]]; then
+  if [[ "$GDPVAL_EXECUTOR" != stirrup ]]; then
+    echo "aa-v2 reproduction requires --executor stirrup" >&2
+    exit 2
+  fi
+  if [[ -n "${GDPVAL_JUDGE_EXECUTOR:-}" ]]; then
+    echo "aa-v2 reproduction does not accept --judge-executor" >&2
+    exit 2
+  fi
+  if [[ -n "${GDPVAL_CONDITION:-}" || -n "${GDPVAL_CONDITION_FILE:-}" ]]; then
+    echo "aa-v2 reproduction does not accept experiment-condition overrides" >&2
+    exit 2
+  fi
+  if [[ -z "${GDPVAL_REFS:-}" ]]; then
+    echo "aa-v2 requires --refs DIR" >&2
+    exit 2
+  fi
+  export GDPVAL_PROFILE=aa-v2 GDPVAL_REWARD_MODE=comparison GDPVAL_JUDGE_PANEL=aa-v2
+  export GDPVAL_REFERENCE_MANIFEST="${GDPVAL_REFERENCE_MANIFEST:-$AA_V2_MANIFEST}"
+fi
+
+if [[ "${GDPVAL_COMMAND:-run}" == compare-runs ]]; then
+  if [[ -n "${GDPVAL_CONDITION:-}" || -n "${GDPVAL_CONDITION_FILE:-}" ]]; then
+    echo "compare-runs uses --label-a/--label-b; --condition is only for policy runs" >&2
+    exit 2
+  fi
+  if [[ -z "${GDPVAL_RUN_A:-}" || -z "${GDPVAL_RUN_B:-}" ]]; then
+    echo "compare-runs requires both --a and --b" >&2
+    exit 2
+  fi
+  export OUT="${OUT:-./results/compare-runs}"
+  if [[ -z "${GDPVAL_JUDGE_EXECUTOR:-}" ]]; then
+    export JUDGE_ONLY=true GDPVAL_REWARD_MODE=comparison
+    export PERSIST_DELIVERABLES_DIR="$GDPVAL_RUN_A"
+    export GDPVAL_SINGLE_REFERENCE_DIR="$GDPVAL_RUN_B"
+    export GDPVAL_SINGLE_REFERENCE_ELO="${GDPVAL_SINGLE_REFERENCE_ELO:-1000}"
+    unset GDPVAL_PROFILE GDPVAL_REFS GDPVAL_REFERENCE_MANIFEST
+  fi
+fi
+
+if [[ -n "${GDPVAL_JUDGE_EXECUTOR:-}" ]]; then
+  case "$GDPVAL_JUDGE_EXECUTOR" in
+    codex|claude-code) ;;
+    *) echo "--judge-executor must be codex or claude-code" >&2; exit 2 ;;
+  esac
+  if [[ "${GDPVAL_COMMAND:-run}" == check ]]; then
+    exec python3 -m gdpval_harness.local_judge_runner check
+  fi
+  if [[ "${GDPVAL_COMMAND:-run}" != compare-runs ]]; then
+    echo "--judge-executor is only valid with compare-runs or check" >&2
+    exit 2
+  fi
+  exec python3 -m gdpval_harness.local_judge_runner run
+fi
+
+if [[ -n "${GDPVAL_PROVIDER:-}" ]]; then
+  if [[ "$GDPVAL_EXECUTOR" != stirrup ]]; then
+    echo "--provider is only valid with --executor stirrup" >&2
+    exit 2
+  fi
+  gdpval_apply_provider "$GDPVAL_PROVIDER"
+fi
+if [[ -n "${GDPVAL_JUDGE_API_KEY:-}" ]]; then export JUDGE_API_KEY="$GDPVAL_JUDGE_API_KEY"; fi
+if [[ -n "${GDPVAL_JUDGE_BASE_URL:-}" ]]; then export JUDGE_BASE_URL="$GDPVAL_JUDGE_BASE_URL"; fi
+if [[ -n "${GDPVAL_JUDGE_MODEL:-}" ]]; then export JUDGE_MODEL_NAME="$GDPVAL_JUDGE_MODEL"; fi
+
+if [[ "$GDPVAL_EXECUTOR" != stirrup ]]; then
+  case "${GDPVAL_EXECUTOR_NETWORK:-disabled}" in
+    disabled|enabled) ;;
+    *) echo "--executor-network must be disabled or enabled" >&2; exit 2 ;;
+  esac
+  if [[ "${GDPVAL_COMMAND:-run}" == compare-runs ]]; then
+    echo "compare-runs uses the judge path; --executor selects policy execution only" >&2
+    exit 2
+  fi
+  if [[ "${PIN_GYM:-0}" != 0 ]]; then
+    echo "--pin-gym is only valid with --executor stirrup" >&2
+    exit 2
+  fi
+  if [[ "${JUDGE_ONLY:-false}" == true || "${GDPVAL_REWARD_MODE:-rubric}" == comparison ]]; then
+    echo "local policy executors produce deliverables only; judging/comparison is a separate command" >&2
+    exit 2
+  fi
+  if [[ "${GDPVAL_COMMAND:-run}" == check ]]; then
+    exec python3 -m gdpval_harness.local_runner check
+  fi
+  if [[ "${GDPVAL_COMMAND:-run}" != run ]]; then
+    echo "executor '$GDPVAL_EXECUTOR' is not valid for command '${GDPVAL_COMMAND:-run}'" >&2
+    exit 2
+  fi
+  exec python3 -m gdpval_harness.local_runner run
+fi
+
+if [[ -n "${GDPVAL_CONDITION_FILE:-}" ]]; then
+  echo "--condition-file is currently supported only by local policy executors" >&2
+  exit 2
+fi
+
+"$PREFLIGHT"
+if [[ "${GDPVAL_CHECK_ONLY:-0}" != 0 ]]; then exit 0; fi
+if [[ "${GDPVAL_WRITE_METADATA:-1}" != 0 ]]; then python3 "$METADATA"; fi
+exec bash "$RECIPE"
