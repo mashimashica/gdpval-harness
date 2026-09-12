@@ -27,6 +27,7 @@ from gdpval_harness.interventions import (
     apply_prompt_overlay,
 )
 from gdpval_harness.layout import TaskLayout, task_layout
+from gdpval_harness.reasoning import ReasoningEffortOption, validate_executor_reasoning_effort
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -58,10 +59,19 @@ def _parse_max_turns() -> int:
     return value
 
 
+def _parse_reasoning_effort() -> ReasoningEffortOption:
+    raw = os.getenv("GDPVAL_REASONING_EFFORT")
+    if raw in {None, ""}:
+        return None
+    return validate_executor_reasoning_effort("codex", raw)
+
+
 def _executor(name: str):
     network_enabled = os.getenv("GDPVAL_EXECUTOR_NETWORK", "disabled") == "enabled"
+    reasoning_effort = _parse_reasoning_effort()
+    validate_executor_reasoning_effort(name, reasoning_effort)
     if name == "codex":
-        return CodexExecutor(network_enabled=network_enabled)
+        return CodexExecutor(network_enabled=network_enabled, reasoning_effort=reasoning_effort)
     if name == "claude-code":
         return ClaudeCodeExecutor(network_enabled=network_enabled, max_turns=_parse_max_turns())
     if name == "cursor":
@@ -140,16 +150,27 @@ def _current_condition_provenance() -> dict[str, object]:
     }
 
 
+def _resume_fingerprint(provenance: dict[str, object]) -> str:
+    encoded = json.dumps(provenance, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
 def _validate_resume_condition(out_dir: Path) -> None:
     if not _truthy("RESUME"):
         return
 
     current = _current_condition_provenance()
+    current_reasoning_effort = _parse_reasoning_effort()
     metadata_path = out_dir / "run-metadata.json"
     if not metadata_path.is_file():
         if current["condition"] is not None or current["condition_file_sha256"] is not None:
             raise ValueError(
                 "conditioned --resume requires the existing run-metadata.json so condition provenance can be verified"
+            )
+        if current_reasoning_effort is not None:
+            raise ValueError(
+                "reasoning-effort --resume requires the existing run-metadata.json so requested configuration "
+                "can be verified"
             )
         return
 
@@ -166,10 +187,29 @@ def _validate_resume_condition(out_dir: Path) -> None:
         "condition_file_sha256": config.get("condition_file_sha256"),
         "condition_applied_to_prompt": bool(config.get("condition_applied_to_prompt")),
     }
-    if existing != current:
+    existing_reasoning_effort = config.get("reasoning_effort_requested")
+    if existing_reasoning_effort is None or existing_reasoning_effort == "":
+        existing_reasoning_effort = None
+    else:
+        existing_reasoning_effort = validate_executor_reasoning_effort("codex", existing_reasoning_effort)
+    existing_resume = {
+        **existing,
+        "reasoning_effort_requested": existing_reasoning_effort,
+    }
+    current_resume = {
+        **current,
+        "reasoning_effort_requested": current_reasoning_effort,
+    }
+    stored_fingerprint = metadata.get("resume_fingerprint_sha256") if isinstance(metadata, dict) else None
+    fingerprints_match = (
+        stored_fingerprint == _resume_fingerprint(existing_resume)
+        if isinstance(stored_fingerprint, str)
+        else existing_resume == current_resume
+    )
+    if not fingerprints_match or existing_resume != current_resume:
         raise ValueError(
-            "--resume condition provenance differs from the existing run; "
-            "use the original condition label/file or a new output directory"
+            "--resume requested provenance differs from the existing run; "
+            "use the original condition/reasoning-effort configuration or a new output directory"
         )
 
 
@@ -318,6 +358,8 @@ def _write_executor_metadata(
         "submitted_files": list(files),
         "metadata": dict(result.metadata),
     }
+    if result.reasoning_effort_requested is not None:
+        payload["reasoning_effort_requested"] = result.reasoning_effort_requested
     if intervention_application is not None:
         payload["intervention_application"] = _application_evidence(intervention_application)
     (layout.executor_dir / "metadata.json").write_text(
@@ -663,6 +705,9 @@ def run() -> int:
         "condition": os.getenv("GDPVAL_CONDITION"),
         "failed_tasks": failures,
     }
+    reasoning_effort = _parse_reasoning_effort()
+    if reasoning_effort is not None:
+        summary["reasoning_effort_requested"] = reasoning_effort
     (out_dir / "executor-summary.json").write_text(json.dumps(summary, indent=2) + "\n", encoding="utf-8")
     return 1 if failures else 0
 

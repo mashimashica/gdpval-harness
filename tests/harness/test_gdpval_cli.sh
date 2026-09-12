@@ -21,6 +21,8 @@ grep -q './gdpval compare-runs --a DIR --b DIR' <<<"$help"
 grep -q './gdpval executors' <<<"$help"
 grep -q -- '--executor NAME' <<<"$help"
 grep -q -- '--judge-executor NAME' <<<"$help"
+grep -q -- '--reasoning-effort VALUE' <<<"$help"
+grep -q -- '--judge-reasoning-effort VALUE' <<<"$help"
 grep -q -- '--condition LABEL' <<<"$help"
 grep -q -- '--condition-file FILE' <<<"$help"
 grep -q 'rejected by Stirrup' <<<"$help"
@@ -59,13 +61,49 @@ if ./gdpval run --executor stirrup --executor-timeout 10 --no-metadata >/dev/nul
   echo "Stirrup unexpectedly accepted an unsupported executor timeout" >&2
   exit 1
 fi
+if ./gdpval run --executor stirrup --reasoning-effort high --no-metadata >/dev/null 2>&1; then
+  echo "Stirrup unexpectedly accepted a Codex reasoning effort" >&2
+  exit 1
+fi
+if ./gdpval compare-runs --a /tmp/missing-a --b /tmp/missing-b --judge-reasoning-effort high >/dev/null 2>&1; then
+  echo "compare-runs unexpectedly accepted a judge effort without a Codex judge" >&2
+  exit 1
+fi
 
 pycache="$(mktemp -d)"
-trap 'rm -rf "$pycache"' EXIT
+metadata_tmp="$(mktemp -d)"
+trap 'rm -rf "$pycache" "$metadata_tmp"' EXIT
+env -i PATH="$PATH" PYTHONPATH="$ROOT" GDPVAL_COMMAND=run GDPVAL_EXECUTOR=codex \
+  OUT="$metadata_tmp/unset" python3 scripts/gdpval_run_metadata.py >/dev/null
+env -i PATH="$PATH" PYTHONPATH="$ROOT" GDPVAL_COMMAND=run GDPVAL_EXECUTOR=codex \
+  GDPVAL_REASONING_EFFORT=max OUT="$metadata_tmp/max" python3 scripts/gdpval_run_metadata.py >/dev/null
+env -i PATH="$PATH" PYTHONPATH="$ROOT" GDPVAL_COMMAND=compare-runs GDPVAL_JUDGE_EXECUTOR=codex \
+  OUT="$metadata_tmp/judge-unset" python3 scripts/gdpval_run_metadata.py >/dev/null
+env -i PATH="$PATH" PYTHONPATH="$ROOT" GDPVAL_COMMAND=compare-runs GDPVAL_JUDGE_EXECUTOR=codex \
+  GDPVAL_JUDGE_REASONING_EFFORT=max OUT="$metadata_tmp/judge-max" python3 scripts/gdpval_run_metadata.py >/dev/null
+python3 - "$metadata_tmp" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+root = Path(sys.argv[1])
+unset = json.loads((root / "unset" / "run-metadata.json").read_text(encoding="utf-8"))
+maximum = json.loads((root / "max" / "run-metadata.json").read_text(encoding="utf-8"))
+judge_unset = json.loads((root / "judge-unset" / "run-metadata.json").read_text(encoding="utf-8"))
+judge_maximum = json.loads((root / "judge-max" / "run-metadata.json").read_text(encoding="utf-8"))
+assert "reasoning_effort_requested" not in unset["configuration"]
+assert maximum["configuration"]["reasoning_effort_requested"] == "max"
+assert unset["configuration_sha256"] != maximum["configuration_sha256"]
+assert unset["resume_fingerprint_sha256"] != maximum["resume_fingerprint_sha256"]
+assert "judge_reasoning_effort_requested" not in judge_unset["configuration"]
+assert judge_maximum["configuration"]["judge_reasoning_effort_requested"] == "max"
+assert judge_unset["configuration_sha256"] != judge_maximum["configuration_sha256"]
+PY
 PYTHONPYCACHEPREFIX="$pycache" python3 -m py_compile \
   scripts/gdpval_run_metadata.py \
   gdpval_harness/__init__.py \
   gdpval_harness/cli.py \
+  gdpval_harness/reasoning.py \
   gdpval_harness/layout.py \
   gdpval_harness/local_runner.py \
   gdpval_harness/local_judge_runner.py \

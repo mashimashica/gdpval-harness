@@ -15,6 +15,7 @@ from typing import Mapping
 from gdpval_harness.executors.codex import CodexExecutor, subscription_environment
 from gdpval_harness.judges.base import JudgeExecutor, JudgePreflightResult, JudgeRequest, JudgeResult
 from gdpval_harness.judges.pairwise import parse_verdict
+from gdpval_harness.reasoning import ReasoningEffortOption, validate_reasoning_effort
 
 
 _PERMISSION_PROFILE = "gdpval-harness-blind-judge"
@@ -153,8 +154,14 @@ class CodexJudgeExecutor(JudgeExecutor):
     name = "codex"
     invocation_mode = "codex exec (local judge)"
 
-    def __init__(self, command: str | None = None) -> None:
+    def __init__(
+        self,
+        command: str | None = None,
+        *,
+        reasoning_effort: ReasoningEffortOption = None,
+    ) -> None:
         self.policy = CodexExecutor(command=command)
+        self.reasoning_effort = validate_reasoning_effort(reasoning_effort)
         self._version: str | None = None
 
     def _version_with_environment(self, environment: Mapping[str, str] | None = None) -> str | None:
@@ -345,6 +352,8 @@ class CodexJudgeExecutor(JudgeExecutor):
                 f"shell_environment_policy={_shell_environment_policy(request)}",
             ]
         )
+        if self.reasoning_effort is not None:
+            command.extend(["-c", f'model_reasoning_effort="{self.reasoning_effort}"'])
         if request.model:
             command.extend(["--model", request.model])
         command.append("-")
@@ -397,6 +406,18 @@ class CodexJudgeExecutor(JudgeExecutor):
             _normalize_utf8_log(stderr_path)
             _normalize_utf8_log(final_path)
 
+        metadata = {
+            "sandbox": "permission-profile/root-deny/workspace-read-only",
+            "read_confinement": "root-deny + minimal-read + anonymous-workspace-read",
+            "network_policy": "disabled by permission profile",
+            "shell_environment_policy": "anonymous-minimal-no-parent-inheritance",
+            "web_search": "disabled",
+            "forced_login_method": "chatgpt",
+            "cloud_execution": False,
+            "parse_error": parse_error,
+        }
+        if self.reasoning_effort is not None:
+            metadata["reasoning_effort_requested"] = self.reasoning_effort
         return JudgeResult(
             task_id=request.task_id,
             trial_index=request.trial_index,
@@ -410,14 +431,6 @@ class CodexJudgeExecutor(JudgeExecutor):
             exit_code=exit_code,
             stdout_path=stdout_path,
             stderr_path=stderr_path,
-            metadata={
-                "sandbox": "permission-profile/root-deny/workspace-read-only",
-                "read_confinement": "root-deny + minimal-read + anonymous-workspace-read",
-                "network_policy": "disabled by permission profile",
-                "shell_environment_policy": "anonymous-minimal-no-parent-inheritance",
-                "web_search": "disabled",
-                "forced_login_method": "chatgpt",
-                "cloud_execution": False,
-                "parse_error": parse_error,
-            },
+            metadata=metadata,
+            reasoning_effort_requested=self.reasoning_effort,
         )

@@ -121,6 +121,8 @@ class ExperimentContractTests(unittest.TestCase):
                 "application_network_enabled",
                 "limit",
                 "order_seed",
+                "builder_reasoning_effort",
+                "application_reasoning_effort",
             ),
         }
         for record, fields in expected_fields.items():

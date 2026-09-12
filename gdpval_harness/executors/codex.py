@@ -17,6 +17,7 @@ from gdpval_harness.executors.base import (
     Executor,
     PreflightResult,
 )
+from gdpval_harness.reasoning import ReasoningEffortOption, validate_reasoning_effort
 
 
 _API_ENV_VARS = {
@@ -60,9 +61,16 @@ class CodexExecutor(Executor):
     invocation_mode = "codex exec"
     tool_permission_mode = "workspace-write + approval_policy=never"
 
-    def __init__(self, *, network_enabled: bool = False, command: str | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        network_enabled: bool = False,
+        command: str | None = None,
+        reasoning_effort: ReasoningEffortOption = None,
+    ) -> None:
         self.network_enabled = network_enabled
         self.command = command or os.getenv("GDPVAL_CODEX_COMMAND", "codex")
+        self.reasoning_effort = validate_reasoning_effort(reasoning_effort)
         self._version: str | None = None
 
     def version(self) -> str | None:
@@ -142,6 +150,7 @@ class CodexExecutor(Executor):
         )
 
     def build_command(self, request: ExecutionRequest) -> list[str]:
+        reasoning_effort = self.reasoning_effort
         final_message = request.executor_dir / "final-message.txt"
         network = "true" if self.network_enabled else "false"
         command = [
@@ -170,12 +179,15 @@ class CodexExecutor(Executor):
         ]
         if not self.network_enabled:
             command.extend(["-c", 'web_search="disabled"'])
+        if reasoning_effort is not None:
+            command.extend(["-c", f'model_reasoning_effort="{reasoning_effort}"'])
         if request.model:
             command.extend(["--model", request.model])
         command.append("-")
         return command
 
     def execute(self, request: ExecutionRequest) -> ExecutionResult:
+        reasoning_effort = self.reasoning_effort
         request.workspace.mkdir(parents=True, exist_ok=True)
         request.deliverables_dir.mkdir(parents=True, exist_ok=True)
         request.executor_dir.mkdir(parents=True, exist_ok=True)
@@ -226,6 +238,21 @@ class CodexExecutor(Executor):
             stderr_path.write_text(stderr, encoding="utf-8")
 
         output_text = _read_output_text(final_message_path)
+        metadata = {
+            "sandbox": "workspace-write",
+            "tool_permission_mode": self.tool_permission_mode,
+            "network_policy": "enabled" if self.network_enabled else "disabled",
+            "web_search": "default" if self.network_enabled else "disabled",
+            "cloud_execution": False,
+            "structured_output": "jsonl",
+            "session_persistence": "ephemeral",
+            "forced_login_method": "chatgpt",
+            "output_text_source": "executor/final-message.txt",
+            "api_environment_removed": sorted(_API_ENV_VARS),
+            "command": command,
+        }
+        if reasoning_effort is not None:
+            metadata["reasoning_effort_requested"] = reasoning_effort
         return ExecutionResult(
             task_id=request.task.task_id,
             executor=self.name,
@@ -239,17 +266,6 @@ class CodexExecutor(Executor):
             finished_at=_utc_now(),
             exit_code=exit_code,
             output_text=output_text,
-            metadata={
-                "sandbox": "workspace-write",
-                "tool_permission_mode": self.tool_permission_mode,
-                "network_policy": "enabled" if self.network_enabled else "disabled",
-                "web_search": "default" if self.network_enabled else "disabled",
-                "cloud_execution": False,
-                "structured_output": "jsonl",
-                "session_persistence": "ephemeral",
-                "forced_login_method": "chatgpt",
-                "output_text_source": "executor/final-message.txt",
-                "api_environment_removed": sorted(_API_ENV_VARS),
-                "command": command,
-            },
+            metadata=metadata,
+            reasoning_effort_requested=reasoning_effort,
         )

@@ -184,7 +184,7 @@ def execution_record(result: ExecutionResult) -> dict[str, object]:
     if not isinstance(result, ExecutionResult):
         raise TypeError("result must be an ExecutionResult")
     status = result.status.value if hasattr(result.status, "value") else result.status
-    return {
+    record = {
         "status": str(status),
         "executor": result.executor,
         "executor_version": result.executor_version,
@@ -198,6 +198,9 @@ def execution_record(result: ExecutionResult) -> dict[str, object]:
         "output_text_present": bool(result.output_text),
         "metadata": {},
     }
+    if result.reasoning_effort_requested is not None:
+        record["reasoning_effort_requested"] = result.reasoning_effort_requested
+    return record
 
 
 __all__ = (

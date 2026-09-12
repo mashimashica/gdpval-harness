@@ -41,6 +41,7 @@ from gdpval_harness.provenance import (
     repository_provenance,
     task_sha256,
 )
+from gdpval_harness.reasoning import ReasoningEffortOption, validate_executor_reasoning_effort
 
 
 _SUCCESS_STATUSES = {ExecutionStatus.COMPLETED, ExecutionStatus.NO_DELIVERABLE}
@@ -99,6 +100,10 @@ def _executor_environment() -> dict[str, str]:
         for key, value in os.environ.items()
         if key not in _LEGACY_CONDITION_ENVIRONMENT_KEYS
     }
+
+
+def _executor_reasoning_effort(executor: Executor) -> ReasoningEffortOption:
+    return validate_executor_reasoning_effort(executor, getattr(executor, "reasoning_effort", None))
 
 
 def _value(value: object) -> object:
@@ -446,6 +451,7 @@ def run_benchmark(
         raise ValueError("--limit must be positive")
     if timeout_seconds <= 0:
         raise ValueError("--executor-timeout must be positive")
+    reasoning_effort = _executor_reasoning_effort(executor)
     out_root = _canonical_planned_root(
         out_dir,
         existing_message=f"refusing to overwrite existing run directory: {out_dir}",
@@ -547,6 +553,8 @@ def run_benchmark(
         "model": model,
         "network_policy": network_policy,
     }
+    if reasoning_effort is not None:
+        executor_descriptor["reasoning_effort_requested"] = reasoning_effort
     ordered_task_records = [
         {"task_id": task.execution.task_id, "task_sha256": task_hashes[task.execution.task_id]}
         for task in tasks
@@ -608,6 +616,8 @@ def run_benchmark(
         "configuration_sha256": configuration_sha256,
         "run_fingerprint_sha256": run_fingerprint_sha256,
     }
+    if reasoning_effort is not None:
+        base_metadata["reasoning_effort_requested"] = reasoning_effort
     _write_json(metadata_path, base_metadata)
 
     rows: list[dict[str, object]] = []

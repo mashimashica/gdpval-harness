@@ -50,6 +50,7 @@ from gdpval_harness.provenance import (
     repository_provenance,
     task_sha256,
 )
+from gdpval_harness.reasoning import validate_executor_reasoning_effort
 from gdpval_harness.runner import RunSummary, run_benchmark
 
 
@@ -277,6 +278,24 @@ def _validate_profile_and_components(
     if not isinstance(application_executor.name, str) or application_executor.name != run_config.application_executor:
         raise ValueError("application executor identity does not match run configuration")
 
+    builder_runtime = getattr(builder, "executor", None)
+    if (
+        validate_executor_reasoning_effort(
+            run_config.builder_executor,
+            getattr(builder_runtime, "reasoning_effort", None),
+        )
+        != run_config.builder_reasoning_effort
+    ):
+        raise ValueError("Builder reasoning_effort does not match the configured Builder executor")
+    if (
+        validate_executor_reasoning_effort(
+            application_executor,
+            getattr(application_executor, "reasoning_effort", None),
+        )
+        != run_config.application_reasoning_effort
+    ):
+        raise ValueError("application reasoning_effort does not match the configured application executor")
+
     evaluator_preflight = _require_exact_result(
         evaluator.preflight(run_dir=out_root), EvaluatorPreflightResult, "evaluator preflight result"
     )
@@ -400,7 +419,7 @@ def _manifest_payload(manifest: BuilderInputManifest) -> dict[str, object]:
 
 
 def _config_payload(config: ExperimentRunConfig) -> dict[str, object]:
-    return {
+    payload = {
         "builder_executor": config.builder_executor,
         "application_executor": config.application_executor,
         "evaluator": config.evaluator,
@@ -413,6 +432,11 @@ def _config_payload(config: ExperimentRunConfig) -> dict[str, object]:
         "limit": config.limit,
         "order_seed": config.order_seed,
     }
+    if config.builder_reasoning_effort is not None:
+        payload["builder_reasoning_effort_requested"] = config.builder_reasoning_effort
+    if config.application_reasoning_effort is not None:
+        payload["application_reasoning_effort_requested"] = config.application_reasoning_effort
+    return payload
 
 
 def _nullable_text(value: object) -> str | None:
@@ -442,7 +466,7 @@ def _builder_descriptor(
     preflight: BuilderPreflightResult,
     config: ExperimentRunConfig,
 ) -> dict[str, object]:
-    return {
+    descriptor = {
         "id": _nullable_text(getattr(builder, "name", None)) or _nullable_text(preflight.name),
         "executor": _nullable_text(preflight.builder_executor),
         "executor_version": _nullable_text(preflight.builder_executor_version),
@@ -451,6 +475,9 @@ def _builder_descriptor(
         "model": config.builder_model,
         "network_policy": "enabled" if config.builder_network_enabled else "disabled",
     }
+    if config.builder_reasoning_effort is not None:
+        descriptor["reasoning_effort_requested"] = config.builder_reasoning_effort
+    return descriptor
 
 
 def _application_executor_descriptor(
@@ -458,7 +485,7 @@ def _application_executor_descriptor(
     preflight: PreflightResult,
     config: ExperimentRunConfig,
 ) -> dict[str, object]:
-    return {
+    descriptor = {
         "id": _nullable_text(preflight.executor),
         "executor": _nullable_text(preflight.executor),
         "executor_version": _nullable_text(preflight.version),
@@ -467,6 +494,9 @@ def _application_executor_descriptor(
         "model": config.application_model,
         "network_policy": "enabled" if config.application_network_enabled else "disabled",
     }
+    if config.application_reasoning_effort is not None:
+        descriptor["reasoning_effort_requested"] = config.application_reasoning_effort
+    return descriptor
 
 
 def _evaluator_descriptor(preflight: EvaluatorPreflightResult) -> dict[str, object]:

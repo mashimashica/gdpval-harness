@@ -13,6 +13,8 @@ from numbers import Real
 from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Sequence
 
+from gdpval_harness.reasoning import ReasoningEffortOption, validate_executor_reasoning_effort
+
 
 _IDENTIFIER = re.compile(r"[a-z0-9][a-z0-9._-]{0,63}\Z")
 _SHA256 = re.compile(r"[0-9a-f]{64}\Z")
@@ -313,6 +315,8 @@ class ExperimentRunConfig:
     application_network_enabled: bool
     limit: int
     order_seed: int
+    builder_reasoning_effort: ReasoningEffortOption = None
+    application_reasoning_effort: ReasoningEffortOption = None
 
     def __post_init__(self) -> None:
         _require_identifier("experiment builder_executor", self.builder_executor)
@@ -348,6 +352,16 @@ class ExperimentRunConfig:
         _require_int("experiment order_seed", self.order_seed, minimum=0)
         if self.order_seed > 2**63 - 1:
             raise ValueError("experiment order_seed must be at most 2**63 - 1")
+        object.__setattr__(
+            self,
+            "builder_reasoning_effort",
+            validate_executor_reasoning_effort(self.builder_executor, self.builder_reasoning_effort),
+        )
+        object.__setattr__(
+            self,
+            "application_reasoning_effort",
+            validate_executor_reasoning_effort(self.application_executor, self.application_reasoning_effort),
+        )
 
 
 __all__ = (

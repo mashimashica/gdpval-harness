@@ -9,6 +9,8 @@ from enum import StrEnum
 from pathlib import Path
 from typing import Mapping, Sequence
 
+from gdpval_harness.reasoning import ReasoningEffortOption, validate_reasoning_effort
+
 
 class ExecutionStatus(StrEnum):
     COMPLETED = "completed"
@@ -52,6 +54,14 @@ class ExecutionResult:
     exit_code: int | None
     output_text: str | None = None
     metadata: Mapping[str, object] = field(default_factory=dict)
+    reasoning_effort_requested: ReasoningEffortOption = None
+
+    def __post_init__(self) -> None:
+        object.__setattr__(
+            self,
+            "reasoning_effort_requested",
+            validate_reasoning_effort(self.reasoning_effort_requested),
+        )
 
 
 @dataclass(frozen=True)

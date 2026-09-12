@@ -18,6 +18,7 @@ from gdpval_harness.experiments.base import ExperimentRunConfig
 from gdpval_harness.experiments.profile import load_experiment_profile
 from gdpval_harness.experiments.runner import run_builder_experiment
 from gdpval_harness.interventions.registry import create_intervention
+from gdpval_harness.reasoning import REASONING_EFFORT_VALUES
 from gdpval_harness.runner import run_benchmark
 
 
@@ -67,6 +68,11 @@ def _parser() -> argparse.ArgumentParser:
     run_parser.add_argument("--executor", default="codex")
     run_parser.add_argument("--limit", required=True, type=int)
     run_parser.add_argument("--model")
+    run_parser.add_argument(
+        "--reasoning-effort",
+        choices=REASONING_EFFORT_VALUES,
+        help="Requested Codex model reasoning effort (recorded configuration; default: unset)",
+    )
     run_parser.add_argument("--out", type=Path)
     run_parser.add_argument("--executor-timeout", type=float, default=12600.0)
     run_parser.add_argument("--network", action="store_true", help="Explicitly enable policy-executor network access")
@@ -103,6 +109,16 @@ def _parser() -> argparse.ArgumentParser:
     experiment_parser.add_argument("--executor", default="codex", dest="executor")
     experiment_parser.add_argument("--builder-model", dest="builder_model")
     experiment_parser.add_argument("--model", dest="model")
+    experiment_parser.add_argument(
+        "--builder-reasoning-effort",
+        choices=REASONING_EFFORT_VALUES,
+        help="Requested Codex Builder reasoning effort (recorded configuration; default: unset)",
+    )
+    experiment_parser.add_argument(
+        "--application-reasoning-effort",
+        choices=REASONING_EFFORT_VALUES,
+        help="Requested Codex application reasoning effort (recorded configuration; default: unset)",
+    )
     experiment_parser.add_argument("--builder-timeout", type=_positive_float, default=12600.0)
     experiment_parser.add_argument("--executor-timeout", type=_positive_float, default=12600.0)
     experiment_parser.add_argument(
@@ -168,11 +184,13 @@ def _run(args: argparse.Namespace) -> int:
     intervention = create_intervention(args.intervention, source=args.intervention_source)
     benchmark = create_benchmark(args.benchmark)
     evaluator = create_evaluator(args.benchmark)
-    executor = create_executor(
-        args.executor,
-        network_enabled=args.network,
-        claude_max_turns=args.claude_max_turns,
-    )
+    executor_kwargs = {
+        "network_enabled": args.network,
+        "claude_max_turns": args.claude_max_turns,
+    }
+    if args.reasoning_effort is not None:
+        executor_kwargs["reasoning_effort"] = args.reasoning_effort
+    executor = create_executor(args.executor, **executor_kwargs)
     out_dir = args.out or _default_out(args.benchmark, args.executor)
     summary = run_benchmark(
         benchmark,
@@ -257,16 +275,20 @@ def _experiment(args: argparse.Namespace) -> int:
 
     benchmark = create_benchmark(benchmark_name)
     evaluator = create_evaluator(benchmark_name)
-    builder_executor = create_executor(
-        args.builder_executor,
-        network_enabled=args.builder_network,
-        claude_max_turns=args.builder_claude_max_turns,
-    )
-    application_executor = create_executor(
-        args.executor,
-        network_enabled=args.network,
-        claude_max_turns=args.claude_max_turns,
-    )
+    builder_kwargs = {
+        "network_enabled": args.builder_network,
+        "claude_max_turns": args.builder_claude_max_turns,
+    }
+    if args.builder_reasoning_effort is not None:
+        builder_kwargs["reasoning_effort"] = args.builder_reasoning_effort
+    builder_executor = create_executor(args.builder_executor, **builder_kwargs)
+    application_kwargs = {
+        "network_enabled": args.network,
+        "claude_max_turns": args.claude_max_turns,
+    }
+    if args.application_reasoning_effort is not None:
+        application_kwargs["reasoning_effort"] = args.application_reasoning_effort
+    application_executor = create_executor(args.executor, **application_kwargs)
     builder = ExecutorSkillBuilder(builder_executor)
     run_config = ExperimentRunConfig(
         builder_executor=builder_executor.name,
@@ -280,6 +302,8 @@ def _experiment(args: argparse.Namespace) -> int:
         application_network_enabled=args.network,
         limit=args.limit,
         order_seed=args.order_seed,
+        builder_reasoning_effort=args.builder_reasoning_effort,
+        application_reasoning_effort=args.application_reasoning_effort,
     )
     out_dir = _planned_absolute_path(args.out, label="--out")
     runtime_root = _planned_absolute_path(args.runtime_root, label="--runtime-root")

@@ -6,6 +6,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from gdpval_harness.executors.base import Executor
+from gdpval_harness.reasoning import ReasoningEffortOption, validate_executor_reasoning_effort
 
 
 @dataclass(frozen=True)
@@ -61,11 +62,13 @@ def create_executor(
     *,
     network_enabled: bool = False,
     claude_max_turns: int = 250,
+    reasoning_effort: ReasoningEffortOption = None,
 ) -> Executor:
+    validate_executor_reasoning_effort(name, reasoning_effort)
     if name == "codex":
         from gdpval_harness.executors.codex import CodexExecutor
 
-        return CodexExecutor(network_enabled=network_enabled)
+        return CodexExecutor(network_enabled=network_enabled, reasoning_effort=reasoning_effort)
     if name == "claude-code":
         from gdpval_harness.executors.claude_code import ClaudeCodeExecutor
 

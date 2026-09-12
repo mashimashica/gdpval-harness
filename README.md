@@ -105,6 +105,25 @@ An explicit `--limit` is required for subscription/account-backed executors and 
 
 The local workspace is isolated per task. Reference files are materialized before execution, and only files placed by the agent under `workspace/deliverables/` are copied into the judge-compatible GDPval deliverables tree.
 
+Codex paths accept an optional requested reasoning effort from the allowlist `minimal`, `low`, `medium`, `high`, `xhigh`, and `max`:
+
+```bash
+./eval run gdpval --executor codex --reasoning-effort high --limit 1
+./eval experiment PROFILE --builder-reasoning-effort high --application-reasoning-effort max \
+  --input-root INPUT_ID=DIR --limit 1 --order-seed 0 --out runs/experiment --runtime-root runs/runtime
+./gdpval run --executor codex --reasoning-effort high --limit 1
+./gdpval compare-runs --a runs/plain/deliverables --b runs/intervention/deliverables \
+  --judge-executor codex --judge-reasoning-effort high --judge-trials 2
+```
+
+The legacy policy flag maps to `GDPVAL_REASONING_EFFORT`; the local compare-runs judge flag maps to
+`GDPVAL_JUDGE_REASONING_EFFORT`. Executor and judge result records call these values `reasoning_effort_requested`;
+the experiment run configuration also keeps the independent Builder and application values under their role-qualified
+configuration keys and descriptors. This records the requested configuration and does not assert that a runtime
+honored it. If the installed Codex runtime or model rejects the requested value, including literal `max`, the harness
+records the failure and stops remaining work without retrying or falling back to another effort or default. The flags
+are rejected for non-Codex executors and judges.
+
 See [SUBSCRIPTION-EXECUTORS.md](SUBSCRIPTION-EXECUTORS.md) for authentication, sandbox, network, usage, and vendor-specific details.
 
 ## Low-cost blind A/B comparison

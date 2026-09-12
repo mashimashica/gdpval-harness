@@ -9,6 +9,8 @@ from enum import Enum
 from pathlib import Path
 from typing import Mapping
 
+from gdpval_harness.reasoning import ReasoningEffortOption, validate_reasoning_effort
+
 
 class Verdict(str, Enum):
     A = "A"
@@ -56,6 +58,14 @@ class JudgeResult:
     stdout_path: Path
     stderr_path: Path
     metadata: Mapping[str, object] = field(default_factory=dict)
+    reasoning_effort_requested: ReasoningEffortOption = None
+
+    def __post_init__(self) -> None:
+        object.__setattr__(
+            self,
+            "reasoning_effort_requested",
+            validate_reasoning_effort(self.reasoning_effort_requested),
+        )
 
 
 class JudgeExecutor(ABC):

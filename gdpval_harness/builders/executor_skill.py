@@ -37,6 +37,7 @@ from gdpval_harness.executors.base import (
     PreflightResult,
 )
 from gdpval_harness.interventions.base import InterventionBundle
+from gdpval_harness.reasoning import validate_executor_reasoning_effort
 
 
 _LEGACY_ENVIRONMENT_KEYS = (
@@ -172,6 +173,10 @@ class ExecutorSkillBuilder(Builder):
         if not isinstance(executor, Executor):
             raise TypeError("executor must be an Executor")
         self.executor = executor
+        self.reasoning_effort = validate_executor_reasoning_effort(
+            executor,
+            getattr(executor, "reasoning_effort", None),
+        )
         self._preflight_result: BuilderPreflightResult | None = None
 
     def _executor_invocation_mode(self) -> str | None:

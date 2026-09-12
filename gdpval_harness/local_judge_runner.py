@@ -26,6 +26,7 @@ from gdpval_harness.judges.pairwise import (
     write_trial_metadata,
 )
 from gdpval_harness.layout import safe_task_id
+from gdpval_harness.reasoning import ReasoningEffortOption, validate_executor_reasoning_effort
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -88,9 +89,18 @@ def _judge_environment(runtime_tmp: Path | None = None) -> dict[str, str]:
     return env
 
 
+def _parse_reasoning_effort() -> ReasoningEffortOption:
+    raw = os.getenv("GDPVAL_JUDGE_REASONING_EFFORT")
+    if raw in {None, ""}:
+        return None
+    return validate_executor_reasoning_effort("codex", raw)
+
+
 def _judge_executor(name: str):
+    reasoning_effort = _parse_reasoning_effort()
+    validate_executor_reasoning_effort(name, reasoning_effort)
     if name == "codex":
-        return CodexJudgeExecutor()
+        return CodexJudgeExecutor(reasoning_effort=reasoning_effort)
     if name == "claude-code":
         return ClaudeCodeJudgeExecutor()
     raise ValueError("local judge executor must be codex or claude-code")
@@ -388,7 +398,7 @@ def _persist_executor_logs(out_dir: Path, task_key: str, trial_index: int, sourc
 
 
 def _interrupted_row(task_key: str, trial_index: int, swapped: bool, preflight: dict[str, object]) -> dict[str, object]:
-    return {
+    row = {
         "task_id": task_key.removeprefix("task_"),
         "trial_index": trial_index,
         "swapped": swapped,
@@ -403,6 +413,10 @@ def _interrupted_row(task_key: str, trial_index: int, swapped: bool, preflight: 
         "finished_at": None,
         "metadata": {"interrupted": True},
     }
+    reasoning_effort = _parse_reasoning_effort()
+    if reasoning_effort is not None:
+        row["reasoning_effort_requested"] = reasoning_effort
+    return row
 
 
 def run() -> int:
@@ -501,6 +515,8 @@ def run() -> int:
                         "finished_at": result.finished_at,
                         "metadata": dict(result.metadata),
                     }
+                    if result.reasoning_effort_requested is not None:
+                        row["reasoning_effort_requested"] = result.reasoning_effort_requested
                     results_handle.write(json.dumps(row, sort_keys=True) + "\n")
                     results_handle.flush()
                     _persist_executor_logs(out_dir, task_key, trial_index, prepared.executor_dir, row)
@@ -554,6 +570,9 @@ def run() -> int:
         "candidate_a": candidate_summary(os.getenv("GDPVAL_LABEL_A"), generator_a),
         "candidate_b": candidate_summary(os.getenv("GDPVAL_LABEL_B"), generator_b),
     }
+    reasoning_effort = _parse_reasoning_effort()
+    if reasoning_effort is not None:
+        summary["reasoning_effort_requested"] = reasoning_effort
     (out_dir / "local-judge-summary.json").write_text(
         json.dumps(summary, indent=2, sort_keys=True) + "\n",
         encoding="utf-8",

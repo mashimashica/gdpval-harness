@@ -19,10 +19,13 @@ experiment_help="$(./eval experiment --help)"
 grep -q -- '--input-root' <<<"$experiment_help"
 grep -q -- '--order-seed' <<<"$experiment_help"
 grep -q -- '--runtime-root' <<<"$experiment_help"
+grep -q -- '--builder-reasoning-effort' <<<"$experiment_help"
+grep -q -- '--application-reasoning-effort' <<<"$experiment_help"
 
 run_help="$(./eval run --help)"
 grep -q -- '--intervention' <<<"$run_help"
 grep -q -- '--intervention-source' <<<"$run_help"
+grep -q -- '--reasoning-effort' <<<"$run_help"
 grep -q 'agent-skill' <<<"$run_help"
 grep -q 'workspace-reference' <<<"$run_help"
 
@@ -67,6 +70,10 @@ fi
 if ./eval run aime26 --executor codex --limit 1 \
   --intervention agent-skill >/dev/null 2>&1; then
   echo "generic eval unexpectedly accepted a missing agent-skill source" >&2
+  exit 1
+fi
+if ./eval run aime26 --executor claude-code --reasoning-effort low --limit 1 >/dev/null 2>&1; then
+  echo "generic eval unexpectedly accepted a non-Codex reasoning effort" >&2
   exit 1
 fi
 
