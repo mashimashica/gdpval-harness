@@ -560,7 +560,8 @@ class ReasoningEffortContractTests(unittest.TestCase):
             application_execution = _json_object(application_row["execution"])
             self.assertEqual(application_execution["reasoning_effort_requested"], "max")
             self.assertEqual(application_execution["exit_code"], 2)
-            self.assertEqual(application_row["evaluation"]["status"], "skipped")
+            application_evaluation = _json_object(application_row["evaluation"])
+            self.assertEqual(application_evaluation["status"], "skipped")
             self.assertEqual(
                 application_execution["failure"],
                 {"kind": "process", "code": "process_exit", "impact": "run"},
