@@ -37,7 +37,7 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 from pathlib import Path, PurePosixPath
 from types import MappingProxyType
-from typing import TYPE_CHECKING, Final, cast
+from typing import TYPE_CHECKING, Final, Literal, cast
 
 
 if TYPE_CHECKING:
@@ -1154,6 +1154,243 @@ def load_snapshot(root: Path) -> BenchmarkSnapshot:
     return verify_snapshot(root)
 
 
+@dataclass(frozen=True, slots=True)
+class _SnapshotSeal:
+    root: tuple[int, int, int, int, int, int]
+    manifest: tuple[int, int, int, int, int, int]
+    blobs: tuple[int, int, int, int, int, int]
+    digest_root: tuple[int, int, int, int, int, int]
+
+
+def _stat_seal(info: os.stat_result) -> tuple[int, int, int, int, int, int]:
+    return (
+        info.st_dev,
+        info.st_ino,
+        info.st_mode,
+        info.st_size,
+        info.st_mtime_ns,
+        info.st_ctime_ns,
+    )
+
+
+def _sealed_directory(path: Path, *, label: str) -> os.stat_result:
+    _ensure_no_symlink_ancestors(path, label=label)
+    try:
+        info = path.lstat()
+    except OSError as exc:
+        raise SnapshotError(f"{label} cannot be read") from exc
+    if stat.S_ISLNK(info.st_mode) or not stat.S_ISDIR(info.st_mode):
+        raise SnapshotError(f"{label} must be a non-symlink directory")
+    return info
+
+
+def _capture_snapshot_seal(root: Path) -> _SnapshotSeal:
+    root_info = _sealed_directory(root, label="snapshot root")
+    manifest = root / _MANIFEST_NAME
+    manifest_info = _lstat_regular(manifest, label="snapshot manifest")
+    blobs = root / "blobs"
+    blobs_info = _sealed_directory(blobs, label="snapshot blob directory")
+    digest_root = blobs / "sha256"
+    digest_info = _sealed_directory(digest_root, label="snapshot digest directory")
+    try:
+        if {child.name for child in root.iterdir()} != {_MANIFEST_NAME, "blobs"}:
+            raise SnapshotError("snapshot root seal does not match its manifest")
+        if {child.name for child in blobs.iterdir()} != {"sha256"}:
+            raise SnapshotError("snapshot blob directory seal is invalid")
+    except OSError as exc:
+        raise SnapshotError("snapshot seal cannot be inspected") from exc
+    return _SnapshotSeal(
+        root=_stat_seal(root_info),
+        manifest=_stat_seal(manifest_info),
+        blobs=_stat_seal(blobs_info),
+        digest_root=_stat_seal(digest_info),
+    )
+
+
+_VERIFIED_ACCESS_TOKEN = object()
+
+
+class VerifiedSnapshotAccess:
+    """Opaque, restricted access to one snapshot verified at open time."""
+
+    __slots__ = ("__root", "__seal", "__snapshot")
+
+    def __init__(
+        self,
+        snapshot: BenchmarkSnapshot,
+        root: Path,
+        seal: _SnapshotSeal,
+        *,
+        _token: object,
+    ) -> None:
+        if _token is not _VERIFIED_ACCESS_TOKEN:
+            raise TypeError("VerifiedSnapshotAccess must be created by open_verified_snapshot")
+        self.__snapshot = snapshot
+        self.__root = root
+        self.__seal = seal
+
+    @property
+    def snapshot(self) -> BenchmarkSnapshot:
+        """Return immutable snapshot semantics without the operational root."""
+
+        self._check_seal()
+        return self.__snapshot
+
+    def _matches_root(self, root: Path) -> bool:
+        """Return whether ``root`` is this exact verified snapshot directory."""
+
+        if not isinstance(root, Path):
+            return False
+        self._check_seal()
+        try:
+            candidate = Path(os.path.abspath(root))
+            info = _sealed_directory(candidate, label="snapshot root binding")
+        except (OSError, RuntimeError, SnapshotError, ValueError):
+            return False
+        return candidate == self.__root and _stat_seal(info) == self.__seal.root
+
+    def _reject_contained_destination(self, destination: Path) -> None:
+        """Reject an output path within this sealed snapshot."""
+
+        self._check_seal()
+        try:
+            absolute = Path(os.path.abspath(destination))
+            absolute.relative_to(self.__root)
+        except ValueError:
+            return
+        except (OSError, RuntimeError) as exc:
+            raise SnapshotError("output destination is invalid") from exc
+        raise SnapshotError("output destination cannot be inside the sealed snapshot")
+
+    def _check_seal(self) -> None:
+        if _capture_snapshot_seal(self.__root) != self.__seal:
+            raise SnapshotError("snapshot seal changed after verification")
+
+    def _view(self, task_id: str, view: Literal["execution", "evaluation"]) -> SnapshotView:
+        if type(task_id) is not str or not task_id:
+            raise SnapshotError("task_id must be a non-empty string")
+        if view not in {"execution", "evaluation"}:
+            raise SnapshotError("snapshot view must be execution or evaluation")
+        try:
+            task = self.__snapshot.task(task_id)
+        except KeyError as exc:
+            raise SnapshotError("snapshot task was not found") from exc
+        return task.execution_view if view == "execution" else task.evaluation_view
+
+    def read_view_file(
+        self,
+        task_id: str,
+        logical_path: str,
+        *,
+        view: Literal["execution", "evaluation"],
+    ) -> bytes:
+        """Read one file from an explicitly selected task view."""
+
+        selected = self._view(task_id, view)
+        logical_path = _validate_logical_path(logical_path, label="snapshot view file path")
+        entry = next((item for item in selected.files if item.path == logical_path), None)
+        if entry is None:
+            raise SnapshotError("snapshot file is not present in the selected task view")
+        self._check_seal()
+        content = _read_race_safe(self.__root / "blobs" / "sha256" / entry.sha256, label="snapshot blob")
+        if len(content) != entry.size or _sha256(content) != entry.sha256:
+            raise SnapshotError("snapshot blob bytes do not match the selected view")
+        self._check_seal()
+        return content
+
+    def materialize_view_subset(
+        self,
+        task_id: str,
+        destination: Path,
+        *,
+        view: Literal["execution", "evaluation"],
+        files: Sequence[SnapshotFile],
+    ) -> tuple[str, ...]:
+        """Atomically materialize only an exact subset of one task view."""
+
+        selected = self._view(task_id, view)
+        requested = _validate_file_projection(tuple(files), label="snapshot view files")
+        available = {item.path: item for item in selected.files}
+        if any(available.get(item.path) != item for item in requested):
+            raise SnapshotError("requested files are not an exact subset of the selected task view")
+        if not isinstance(destination, Path):
+            raise SnapshotError("snapshot view destination must be a filesystem path")
+        try:
+            destination = Path(os.path.abspath(destination))
+            destination.relative_to(self.__root)
+        except ValueError:
+            pass
+        except (OSError, RuntimeError) as exc:
+            raise SnapshotError("snapshot view destination is invalid") from exc
+        else:
+            raise SnapshotError("snapshot view destination cannot be inside the sealed snapshot")
+        _ensure_no_symlink_ancestors(destination.parent, label="snapshot view destination")
+        try:
+            destination.parent.mkdir(parents=True, exist_ok=True)
+        except OSError as exc:
+            raise SnapshotError("snapshot view destination parent cannot be created") from exc
+        _ensure_no_symlink_ancestors(destination.parent, label="snapshot view destination")
+        if destination.exists() or destination.is_symlink():
+            raise SnapshotError("snapshot view destination must be fresh")
+
+        self._check_seal()
+        stage: Path | None = None
+        materialized: list[str] = []
+        try:
+            stage = Path(tempfile.mkdtemp(prefix=f".{destination.name}.staging-", dir=str(destination.parent)))
+            for item in requested:
+                target = stage.joinpath(*item.path.split("/"))
+                target.parent.mkdir(parents=True, exist_ok=True)
+                _ensure_no_symlink_ancestors(target.parent, label="snapshot view staging")
+                _copy_verified_file(
+                    self.__root / "blobs" / "sha256" / item.sha256,
+                    target,
+                    expected_size=item.size,
+                    expected_sha256=item.sha256,
+                    label="snapshot blob",
+                )
+                materialized.append(item.path)
+            self._check_seal()
+            _fsync_directory(stage)
+            if destination.exists() or destination.is_symlink():
+                raise SnapshotError("snapshot view destination must be fresh")
+            os.rename(stage, destination)
+            stage = None
+            _fsync_directory(destination.parent)
+            return tuple(materialized)
+        except SnapshotError:
+            raise
+        except OSError as exc:
+            raise SnapshotError("snapshot view files cannot be materialized") from exc
+        finally:
+            if stage is not None:
+                shutil.rmtree(stage, ignore_errors=True)
+
+
+def open_verified_snapshot(root: Path) -> VerifiedSnapshotAccess:
+    """Fully verify a snapshot once and return restricted, revalidating access."""
+
+    if not isinstance(root, Path):
+        raise SnapshotError("snapshot root must be a filesystem path")
+    root = Path(os.path.abspath(root))
+    before = _capture_snapshot_seal(root)
+    verified = verify_snapshot(root)
+    after = _capture_snapshot_seal(root)
+    if before != after:
+        raise SnapshotError("snapshot seal changed during verification")
+    public_snapshot = BenchmarkSnapshot(
+        benchmark_id=verified.benchmark_id,
+        source=verified.source,
+        source_availability=verified.source_availability,
+        revision=verified.revision,
+        revision_availability=verified.revision_availability,
+        tasks=verified.tasks,
+        root=Path("."),
+        snapshot_sha256=verified.snapshot_sha256,
+    )
+    return VerifiedSnapshotAccess(public_snapshot, root, after, _token=_VERIFIED_ACCESS_TOKEN)
+
+
 def read_evaluation_file(
     snapshot: BenchmarkSnapshot | Path,
     task_id: str,
@@ -1324,10 +1561,12 @@ __all__ = [
     "SnapshotTask",
     "SnapshotTaskContent",
     "SnapshotView",
+    "VerifiedSnapshotAccess",
     "acquire_snapshot",
     "load_snapshot",
     "materialize_evaluation",
     "materialize_execution",
+    "open_verified_snapshot",
     "read_evaluation_file",
     "verify_snapshot",
 ]
