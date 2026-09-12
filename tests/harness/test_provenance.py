@@ -217,6 +217,7 @@ class ProvenanceTests(unittest.TestCase):
 
     def test_execution_record_preserves_typed_fields_and_discards_metadata(self) -> None:
         result = ExecutionResult(
+            runtime="test",
             task_id="secret-task-id",
             executor="executor",
             executor_version="version",
@@ -242,8 +243,12 @@ class ProvenanceTests(unittest.TestCase):
                 "status",
                 "executor",
                 "executor_version",
+                "runtime",
                 "invocation_mode",
                 "auth_mode",
+                "model_id",
+                "effective_reasoning_effort",
+                "effective_reasoning_effort_available",
                 "workspace",
                 "deliverables_dir",
                 "started_at",
@@ -256,6 +261,10 @@ class ProvenanceTests(unittest.TestCase):
             },
         )
         self.assertEqual(record["status"], "completed")
+        self.assertEqual(record["runtime"], "test")
+        self.assertIsNone(record["model_id"])
+        self.assertIsNone(record["effective_reasoning_effort"])
+        self.assertFalse(record["effective_reasoning_effort_available"])
         self.assertEqual(record["workspace"], "/private/workspace")
         self.assertEqual(record["deliverables_dir"], "/private/deliverables")
         self.assertTrue(record["output_text_present"])

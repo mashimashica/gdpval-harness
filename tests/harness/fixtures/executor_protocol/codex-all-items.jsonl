@@ -1,0 +1,18 @@
+{"type":"thread.started","thread_id":"thread_fixture"}
+{"type":"turn.started","future_turn_field":{"accepted":true}}
+{"type":"item.started","item":{"id":"command_1","type":"command_execution","command":"echo fixture","aggregated_output":"fixture\n","exit_code":null,"status":"in_progress"}}
+{"type":"item.updated","item":{"id":"reasoning_1","type":"reasoning","text":"reasoning summary"}}
+{"type":"item.completed","item":{"id":"command_2","type":"command_execution","command":"true","aggregated_output":"","exit_code":0,"status":"completed"}}
+{"type":"item.completed","item":{"id":"file_1","type":"file_change","changes":[{"path":"answer.txt","kind":"add"}],"status":"completed"}}
+{"type":"item.completed","item":{"id":"mcp_1","type":"mcp_tool_call","server":"fixture-server","tool":"fixture-tool","arguments":{"input":1},"result":{"content":[]},"error":null,"status":"completed"}}
+{"type":"item.completed","item":{"id":"collab_1","type":"collab_tool_call","tool":"wait","sender_thread_id":"thread_fixture","receiver_thread_ids":[],"prompt":null,"agents_states":{"agent_fixture":{"status":"completed","message":null}},"status":"completed"}}
+{"type":"item.completed","item":{"id":"web_search_1","type":"web_search","query":"fixture query","action":{"type":"search","query":"fixture query"}}}
+{"type":"item.completed","item":{"id":"web_open_1","type":"web_search","query":"fixture query","action":{"type":"open_page","url":"https://example.invalid"}}}
+{"type":"item.completed","item":{"id":"web_find_1","type":"web_search","query":"fixture query","action":{"type":"find_in_page","pattern":"fixture","url":"https://example.invalid"}}}
+{"type":"item.completed","item":{"id":"web_other_1","type":"web_search","query":"fixture query","action":{"type":"other"}}}
+{"type":"item.completed","item":{"id":"todo_1","type":"todo_list","items":[{"text":"finish fixture","completed":true}]}}
+{"type":"item.completed","item":{"id":"error_1","type":"error","message":"non-fatal fixture error"}}
+{"type":"item.completed","item":{"id":"agent_1","type":"agent_message","text":"intermediate text"}}
+{"type":"item.completed","item":{"id":"file_2","type":"file_change","changes":[],"status":"in_progress"}}
+{"type":"item.completed","item":{"id":"mcp_2","type":"mcp_tool_call","server":"fixture-server","tool":"fixture-tool","result":null,"error":{"message":"tool failed"},"status":"failed"}}
+{"type":"turn.completed","usage":{"input_tokens":1,"cached_input_tokens":0,"cache_write_input_tokens":0,"output_tokens":1,"reasoning_output_tokens":0}}

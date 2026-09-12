@@ -1,0 +1,5 @@
+{"type":"thread.started","thread_id":"thread_fixture"}
+{"type":"turn.started"}
+{"type":"item.started","item":{"id":"item_1","type":"command_execution","command":"echo fixture","aggregated_output":"fixture\n","exit_code":null,"status":"in_progress"}}
+{"type":"item.completed","item":{"id":"item_2","type":"agent_message","text":"intermediate text"},"future_field":{"accepted":true}}
+{"type":"turn.completed","usage":{"input_tokens":1,"cached_input_tokens":0,"output_tokens":1,"reasoning_output_tokens":0}}

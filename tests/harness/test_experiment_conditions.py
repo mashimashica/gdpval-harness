@@ -74,6 +74,7 @@ class _CapturingLocalExecutor:
     def execute(self, request: ExecutionRequest) -> ExecutionResult:
         self.requests.append(request)
         return ExecutionResult(
+            runtime="test",
             task_id=request.task.task_id,
             executor=self.name,
             executor_version="fake-1",

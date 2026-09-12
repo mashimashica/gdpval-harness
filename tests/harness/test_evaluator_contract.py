@@ -29,6 +29,7 @@ from eval_harness.executors.base import ExecutionResult, ExecutionStatus
 def _result(root: Path, task_id: str = "task") -> ExecutionResult:
     workspace = root / "workspace"
     return ExecutionResult(
+        runtime="test",
         task_id=task_id,
         executor="fake",
         executor_version="1",

@@ -68,6 +68,7 @@ def execution_result(root: Path, *, status: ExecutionStatus = ExecutionStatus.CO
     successful = status in {ExecutionStatus.COMPLETED, ExecutionStatus.NO_DELIVERABLE}
     output_text = "answer" if successful else None
     return ExecutionResult(
+        runtime="test",
         task_id="task",
         executor="fake",
         executor_version="fake-v1",

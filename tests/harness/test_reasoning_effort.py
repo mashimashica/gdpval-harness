@@ -131,7 +131,10 @@ class _FakeExecutor(Executor):
     """Deterministic codex-named executor used for metadata and experiment tests."""
 
     name = "codex"
+    runtime = "test"
     invocation_mode = "fake-codex"
+    network_access_enabled: bool = False
+    reasoning_effort: ReasoningEffortOption
 
     def __init__(self, reasoning_effort: ReasoningEffortOption, *, skill: bool = False) -> None:
         self.reasoning_effort = reasoning_effort
@@ -158,6 +161,7 @@ class _FakeExecutor(Executor):
         else:
             (request.deliverables_dir / "answer.txt").write_text("answer\n", encoding="utf-8")
         return ExecutionResult(
+            runtime="test",
             task_id=request.task.task_id,
             executor=self.name,
             executor_version="fake-codex-1",

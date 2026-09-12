@@ -52,6 +52,7 @@ from eval_harness.judges.base import JudgeExecutor, JudgePreflightResult, JudgeR
 from eval_harness.judges.pairwise import discover_tasks
 from eval_harness.local_judge_runner import _candidate_task_prompt
 from eval_harness.provenance import RepositoryProvenance, canonical_json_sha256
+from eval_harness.reasoning import ReasoningEffortOption
 from eval_harness.runner import run_benchmark
 
 
@@ -256,7 +257,10 @@ class FakeEvaluator(Evaluator):
 
 class FakeExecutor(Executor):
     name = "fake-executor"
+    runtime = "test"
     invocation_mode = "fake"
+    network_access_enabled: bool = False
+    reasoning_effort: ReasoningEffortOption = None
 
     def __init__(
         self,
@@ -318,6 +322,7 @@ class FakeExecutor(Executor):
             deliverables_dir = request.workspace.parent.parent / "outside-deliverables"
             deliverables_dir.mkdir(parents=True, exist_ok=True)
         return ExecutionResult(
+            runtime="test",
             task_id=request.task.task_id,
             executor=self.result_executor or self.name,
             executor_version=self.result_version,

@@ -36,6 +36,7 @@ class AIME26BenchmarkTests(unittest.TestCase):
             output_text if status in {ExecutionStatus.COMPLETED, ExecutionStatus.NO_DELIVERABLE} else None
         )
         return ExecutionResult(
+            runtime="test",
             task_id="aime26-01",
             executor="codex",
             executor_version="test",

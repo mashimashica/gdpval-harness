@@ -51,6 +51,7 @@ from eval_harness.interventions.base import (
 from eval_harness.interventions.none import NoneIntervention
 from eval_harness.judges.base import JudgeExecutor, JudgePreflightResult, JudgeRequest, JudgeResult, Verdict
 from eval_harness.layout import task_layout
+from eval_harness.reasoning import ReasoningEffortOption
 
 
 def detail_text(payload: Mapping[str, object]) -> list[str]:
@@ -133,7 +134,10 @@ class ReliabilityEvaluator(Evaluator):
 
 class ReliabilityExecutor(Executor):
     name = "reliability-executor"
+    runtime = "test"
     invocation_mode = "reliability"
+    network_access_enabled: bool = False
+    reasoning_effort: ReasoningEffortOption = None
 
     def __init__(self) -> None:
         self.preflight_ok = True
@@ -170,6 +174,7 @@ class ReliabilityExecutor(Executor):
         successful = self.result_status in {ExecutionStatus.COMPLETED, ExecutionStatus.NO_DELIVERABLE}
         output_text = "executor output" if successful else None
         return ExecutionResult(
+            runtime="test",
             task_id=self.result_task_id or request.task.task_id,
             executor=self.result_executor or self.name,
             executor_version=self.result_version,
@@ -427,6 +432,7 @@ class RunnerReliabilityTests(unittest.TestCase):
             (layout.workspace / "reference_files").mkdir()
             (layout.workspace / "reference_files" / "ref.txt").write_text("reference", encoding="utf-8")
             result = ExecutionResult(
+                runtime="test",
                 task_id=task.task_id,
                 executor="codex",
                 executor_version="1",
@@ -974,6 +980,7 @@ class GenericRunnerReliabilityTests(unittest.TestCase):
         workspace.mkdir(parents=True, exist_ok=True)
         deliverables.mkdir(parents=True, exist_ok=True)
         return ExecutionResult(
+            runtime="test",
             task_id=task_id,
             executor="reliability-executor",
             executor_version="reliability-executor-v1",

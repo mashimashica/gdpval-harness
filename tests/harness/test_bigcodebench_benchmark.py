@@ -55,6 +55,7 @@ class BigCodeBenchBenchmarkTests(unittest.TestCase):
             output_text if status in {ExecutionStatus.COMPLETED, ExecutionStatus.NO_DELIVERABLE} else None
         )
         return ExecutionResult(
+            runtime="test",
             task_id="BigCodeBench/1",
             executor="codex",
             executor_version="test",

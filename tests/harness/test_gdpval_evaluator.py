@@ -22,6 +22,7 @@ def _execution(root: Path, *, status: ExecutionStatus = ExecutionStatus.COMPLETE
     successful = status in {ExecutionStatus.COMPLETED, ExecutionStatus.NO_DELIVERABLE}
     output_text = "answer" if successful else None
     return ExecutionResult(
+        runtime="test",
         task_id="task/x",
         executor="fake",
         executor_version="fake-1",

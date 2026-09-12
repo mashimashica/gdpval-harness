@@ -18,10 +18,27 @@ from eval_harness.executors.base import ExecutionResult, ExecutionStatus
 from eval_harness.executors.claude_code import ClaudeCodeExecutor
 from eval_harness.executors.codex import CodexExecutor
 from eval_harness.executors.cursor import CursorExecutor
+from eval_harness.executors.registry import list_executors
 from eval_harness.failures import Failure, FailureImpact, FailureKind, RunAbort
+from eval_harness.reasoning import ReasoningEffortOption
 
 
 class ExecutionCapabilitiesTests(unittest.TestCase):
+    def test_registry_status_is_capability_based_and_does_not_claim_stirrup_integration(self) -> None:
+        descriptors = {descriptor.name: descriptor for descriptor in list_executors()}
+        self.assertEqual(
+            descriptors["claude-code"].generic_runner_status,
+            "available for capability-compatible requests",
+        )
+        self.assertEqual(
+            descriptors["cursor"].generic_runner_status,
+            "available for capability-compatible requests",
+        )
+        self.assertEqual(
+            descriptors["stirrup"].generic_runner_status,
+            "not available through the generic runner until PR07 integration",
+        )
+
     @staticmethod
     def _result(
         *,
@@ -29,6 +46,10 @@ class ExecutionCapabilitiesTests(unittest.TestCase):
         available_outputs: frozenset[ExecutorOutput] = frozenset(),
         failure: Failure | None = None,
         output_text: str | None = None,
+        runtime: str = "host-subprocess",
+        model_id: str | None = None,
+        effective_reasoning_effort: ReasoningEffortOption = None,
+        effective_reasoning_effort_available: bool = False,
     ) -> ExecutionResult:
         return ExecutionResult(
             task_id="task",
@@ -45,6 +66,10 @@ class ExecutionCapabilitiesTests(unittest.TestCase):
             available_outputs=available_outputs,
             failure=failure,
             output_text=output_text,
+            runtime=runtime,
+            model_id=model_id,
+            effective_reasoning_effort=effective_reasoning_effort,
+            effective_reasoning_effort_available=effective_reasoning_effort_available,
         )
 
     def test_capability_types_normalize_to_immutable_sets(self) -> None:
@@ -98,7 +123,18 @@ class ExecutionCapabilitiesTests(unittest.TestCase):
         for executor in (ClaudeCodeExecutor, CursorExecutor):
             with self.subTest(executor=executor.__name__):
                 self.assertEqual(executor.capabilities.inputs, expected_inputs)
-                self.assertEqual(executor.capabilities.outputs, frozenset({ExecutorOutput.ARTIFACT_FILES}))
+                self.assertEqual(
+                    executor.capabilities.outputs,
+                    frozenset({ExecutorOutput.FINAL_TEXT, ExecutorOutput.ARTIFACT_FILES}),
+                )
+        for executor_instance in (CodexExecutor(), ClaudeCodeExecutor(), CursorExecutor()):
+            with self.subTest(executor=executor_instance.name):
+                self.assertIs(type(executor_instance.network_access_enabled), bool)
+                self.assertFalse(hasattr(executor_instance, "network_enabled"))
+                self.assertTrue(hasattr(executor_instance, "reasoning_effort"))
+        self.assertEqual(CodexExecutor(reasoning_effort="high").reasoning_effort, "high")
+        self.assertIsNone(ClaudeCodeExecutor().reasoning_effort)
+        self.assertIsNone(CursorExecutor().reasoning_effort)
 
     def test_unknown_capability_and_wrong_contract_types_fail_closed(self) -> None:
         empty_requirements = ExecutionRequirements(inputs=frozenset(), outputs=frozenset())
@@ -177,6 +213,34 @@ class ExecutionCapabilitiesTests(unittest.TestCase):
         result = self._result(status=ExecutionStatus.FAILED, failure=failure)
         self.assertIs(result.failure, failure)
         self.assertEqual(result.available_outputs, frozenset())
+        for kind in (FailureKind.PROCESS, FailureKind.TIMEOUT, FailureKind.TRANSPORT, FailureKind.INTERRUPTED):
+            with self.subTest(kind=kind):
+                task_failure = Failure(kind, "stable_failure", FailureImpact.TASK)
+                with self.assertRaises(ValueError):
+                    self._result(status=ExecutionStatus.FAILED, failure=task_failure)
+
+    def test_execution_result_records_runtime_model_and_authoritative_effort(self) -> None:
+        result = self._result(
+            available_outputs=frozenset({ExecutorOutput.FINAL_TEXT}),
+            output_text="answer",
+            runtime="host-subprocess",
+            model_id="model-id",
+            effective_reasoning_effort="high",
+            effective_reasoning_effort_available=True,
+        )
+        self.assertEqual(result.runtime, "host-subprocess")
+        self.assertEqual(result.model_id, "model-id")
+        self.assertEqual(result.effective_reasoning_effort, "high")
+        self.assertTrue(result.effective_reasoning_effort_available)
+
+        with self.assertRaises(ValueError):
+            self._result(runtime="")
+        with self.assertRaises(ValueError):
+            self._result(model_id="")
+        with self.assertRaises(TypeError):
+            self._result(effective_reasoning_effort_available=1)  # type: ignore[arg-type]
+        with self.assertRaises(ValueError):
+            self._result(effective_reasoning_effort="high")
 
     def test_failure_records_are_immutable_and_systemic_kinds_cannot_be_task_impact(self) -> None:
         failure = Failure(FailureKind.PROCESS, "executor_exit", FailureImpact.TASK)

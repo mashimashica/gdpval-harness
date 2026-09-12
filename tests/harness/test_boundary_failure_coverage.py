@@ -83,6 +83,7 @@ def _execution_result(
     workspace = root / "workspace"
     effective_output = output_text if status in {ExecutionStatus.COMPLETED, ExecutionStatus.NO_DELIVERABLE} else None
     return ExecutionResult(
+        runtime="test",
         task_id=task_id,
         executor="fake",
         executor_version="fake-1",
@@ -733,6 +734,7 @@ class EvaluatorBoundaryTests(unittest.TestCase):
             (overlapping_artifacts / "answer.txt").write_text("answer", encoding="utf-8")
             overlapping_result = _execution_result(root, deliverables=overlapping_artifacts)
             overlapping_result = ExecutionResult(
+                runtime="test",
                 task_id=overlapping_result.task_id,
                 executor=overlapping_result.executor,
                 executor_version=overlapping_result.executor_version,

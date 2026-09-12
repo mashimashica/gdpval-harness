@@ -56,6 +56,7 @@ from eval_harness.experiments.base import (
 from eval_harness.failures import Failure, FailureImpact, FailureKind, RunAbort
 from eval_harness.interventions import load_agent_skill_bundle
 from eval_harness.provenance import RepositoryProvenance, canonical_json_sha256
+from eval_harness.reasoning import ReasoningEffortOption
 from eval_harness.runner import RunSummary
 
 
@@ -106,7 +107,10 @@ class ReliabilityEvaluator(Evaluator):
 
 class ReliabilityApplicationExecutor(Executor):
     name = "reliability-application"
+    runtime = "test"
     invocation_mode = "deterministic"
+    network_access_enabled: bool = False
+    reasoning_effort: ReasoningEffortOption = None
 
     def __init__(
         self,
@@ -131,6 +135,7 @@ class ReliabilityApplicationExecutor(Executor):
         failure_kind = FailureKind.INTERRUPTED if self.status is ExecutionStatus.INTERRUPTED else FailureKind.PROCESS
         failure_code = "interrupted" if self.status is ExecutionStatus.INTERRUPTED else "test_failure"
         return ExecutionResult(
+            runtime="test",
             task_id=request.task.task_id,
             executor=self.name,
             executor_version="1",
@@ -149,7 +154,10 @@ class ReliabilityApplicationExecutor(Executor):
 
 class ReliabilityBuilderExecutor(Executor):
     name = "reliability-builder-executor"
+    runtime = "test"
     invocation_mode = "deterministic"
+    network_access_enabled: bool = False
+    reasoning_effort: ReasoningEffortOption = None
 
     def __init__(self) -> None:
         self.requests: list[ExecutionRequest] = []
@@ -168,6 +176,7 @@ class ReliabilityBuilderExecutor(Executor):
             encoding="utf-8",
         )
         return ExecutionResult(
+            runtime="test",
             task_id=request.task.task_id,
             executor=self.name,
             executor_version="1",
@@ -543,6 +552,7 @@ class ExperimentReliabilityTests(unittest.TestCase):
             (skill / "SKILL.md").write_text("---\nname: skill\ndescription: skill\n---\n\ncontent\n", encoding="utf-8")
             sealed = load_agent_skill_bundle(skill)
             execution = ExecutionResult(
+                runtime="test",
                 task_id="task-one",
                 executor="builder",
                 executor_version="1",

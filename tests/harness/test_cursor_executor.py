@@ -89,11 +89,15 @@ class CursorExecutorTests(unittest.TestCase):
                 "PATH": "/bin",
                 "CURSOR_API_KEY": "secret",
                 "CURSOR_AUTH_TOKEN": "token",
+                "CURSOR_LOCAL_PROVIDER_URL": "http://127.0.0.1:9999",
+                "CURSOR_BEDROCK_ENDPOINT_URL": "https://bedrock.example.invalid",
                 "KEEP_ME": "yes",
             }
         )
         self.assertNotIn("CURSOR_API_KEY", env)
         self.assertNotIn("CURSOR_AUTH_TOKEN", env)
+        self.assertNotIn("CURSOR_LOCAL_PROVIDER_URL", env)
+        self.assertNotIn("CURSOR_BEDROCK_ENDPOINT_URL", env)
         self.assertEqual(env["KEEP_ME"], "yes")
 
 

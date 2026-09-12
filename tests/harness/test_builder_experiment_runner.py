@@ -51,6 +51,7 @@ from eval_harness.failures import Failure, FailureImpact, FailureKind, RunAbort
 from eval_harness.interventions.agent_skill import load_agent_skill_bundle
 from eval_harness.interventions.base import InterventionBundle
 from eval_harness.provenance import canonical_json_sha256
+from eval_harness.reasoning import ReasoningEffortOption
 
 
 class _Benchmark(Benchmark):
@@ -119,7 +120,10 @@ class _Evaluator(Evaluator):
 
 class _ApplicationExecutor(Executor):
     name = "generic-application"
+    runtime = "test"
     invocation_mode = "fake"
+    network_access_enabled: bool = False
+    reasoning_effort: ReasoningEffortOption = None
 
     def __init__(
         self,
@@ -152,6 +156,7 @@ class _ApplicationExecutor(Executor):
         failed = self.fail_on_call == len(self.requests)
         effective_output = None if failed else "private output sentinel"
         return ExecutionResult(
+            runtime="test",
             task_id=request.task.task_id,
             executor=self.name,
             executor_version="application-1",
@@ -221,6 +226,7 @@ class _Builder(Builder):
         executor_dir.mkdir()
         deliverables.mkdir()
         execution = ExecutionResult(
+            runtime="test",
             task_id=request.task.task_id,
             executor="generic-builder-executor",
             executor_version="builder-1",
