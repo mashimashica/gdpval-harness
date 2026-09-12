@@ -459,11 +459,13 @@ explicit_package_bases = true
 follow_imports = "silent"
 files = [
     "gdpval_harness",
+    "scripts/ci/run_gdpval_harness_coverage.py",
     "scripts/gdpval_run_metadata.py",
     "scripts/update_env_list.py",
     "tests/harness",
     "tests/test_update_env_list.py",
     "tests/unit_tests/test_update_env_list.py",
+    "tests/unit_tests/test_hf_utils.py",
 ]
 
 [tool.uv]

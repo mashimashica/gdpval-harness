@@ -75,7 +75,7 @@ jobs:
           if-no-files-found: warn
 
   harness-tests:
-    name: Harness tests
+    name: Harness tests and coverage
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -104,15 +104,42 @@ jobs:
           uv sync --locked --extra dev 2>&1 | tee ci-artifacts/harness-tests/uv-sync.log
           test "$(uv run --no-sync python --version)" = "Python ${PYTHON_VERSION}"
 
-      - name: Run GDPval harness self-test
+      - name: Run GDPval harness self-test with coverage
         run: |
           set -euo pipefail
           source .venv/bin/activate
           test "$(python --version)" = "Python ${PYTHON_VERSION}"
-          bash tests/harness/test_gdpval_cli.sh 2>&1 \
+          coverage erase --rcfile=config/gdpval-harness-coveragerc
+          coverage run --rcfile=config/gdpval-harness-coveragerc scripts/ci/run_gdpval_harness_coverage.py 2>&1 \
             | tee ci-artifacts/harness-tests/test-gdpval-cli.log
+          coverage combine --rcfile=config/gdpval-harness-coveragerc
+          coverage json --rcfile=config/gdpval-harness-coveragerc \
+            --pretty-print -o ci-artifacts/harness-tests/coverage.json
+          uv run --no-sync python scripts/ci/run_gdpval_harness_coverage.py \
+            --check-summary ci-artifacts/harness-tests/coverage.json 2>&1 \
+            | tee ci-artifacts/harness-tests/coverage-guard.log
+          coverage report --rcfile=config/gdpval-harness-coveragerc 2>&1 \
+            | tee ci-artifacts/harness-tests/coverage-report.txt
 
-      - name: Upload harness test logs
+      - name: Run dependency compatibility tests
+        run: |
+          set -euo pipefail
+          uv run --no-sync pytest \
+            tests/unit_tests/test_hf_utils.py \
+            tests/unit_tests/test_dataset_source.py \
+            tests/unit_tests/test_dataset_orchestrator.py \
+            tests/unit_tests/test_server_utils.py 2>&1 \
+            | tee ci-artifacts/harness-tests/dependency-compatibility.log
+
+      - name: Run environment inventory updater tests
+        run: |
+          set -euo pipefail
+          uv run --no-sync pytest \
+            tests/test_update_env_list.py \
+            tests/unit_tests/test_update_env_list.py 2>&1 \
+            | tee ci-artifacts/harness-tests/test-update-env-list.log
+
+      - name: Upload harness test and coverage artifacts
         if: ${{ always() }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
@@ -121,7 +148,7 @@ jobs:
           if-no-files-found: warn
 
   type-check:
-    name: Type check
+    name: Strict type check
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -150,10 +177,18 @@ jobs:
           uv sync --locked --extra dev 2>&1 | tee ci-artifacts/type-check/uv-sync.log
           test "$(uv run --no-sync python --version)" = "Python ${PYTHON_VERSION}"
 
-      - name: Run strict GDPval harness type check
+      - name: Run strict GDPval type check
         run: |
           set -euo pipefail
-          uv run --no-sync mypy --show-error-codes 2>&1 \
+          uv run --no-sync mypy --strict --explicit-package-bases --show-error-codes \
+            gdpval_harness \
+            tests/harness \
+            scripts/gdpval_run_metadata.py \
+            scripts/ci/run_gdpval_harness_coverage.py \
+            scripts/update_env_list.py \
+            tests/test_update_env_list.py \
+            tests/unit_tests/test_update_env_list.py \
+            tests/unit_tests/test_hf_utils.py 2>&1 \
             | tee ci-artifacts/type-check/mypy.log
 
       - name: Upload type-check logs
