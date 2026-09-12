@@ -119,7 +119,7 @@ class LocalJudgeExecutorTests(unittest.TestCase):
                 environment={
                     "PATH": "/candidate/identity/bin",
                     "HOME": "/real/home",
-                    "HTTPS_PROXY": "http://alice:sekrit@proxy.example:8080",
+                    "HTTPS_PROXY": "http://alice:sekrit@proxy.example:8080",  # pragma: allowlist secret
                     "GDPVAL_LABEL_A": "baseline-secret",
                     "TMPDIR": str(runtime_tmp),
                     "TMP": str(runtime_tmp),

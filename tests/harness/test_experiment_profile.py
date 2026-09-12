@@ -22,7 +22,7 @@ from gdpval_harness.experiments.base import ExperimentArm, ExperimentInputSpec, 
 from gdpval_harness.experiments.profile import load_experiment_inputs, load_experiment_profile
 
 
-_HEAD = "0123456789abcdef0123456789abcdef01234567"
+_HEAD = "0123456789abcdef0123456789abcdef01234567"  # pragma: allowlist secret
 
 
 class _DuplicateKeyMapping(Mapping[str, Path]):
