@@ -1067,9 +1067,7 @@ def run_builder_experiment(
                 _persist_metadata(metadata_path, metadata, status="interrupted", completed=completed, finished=True)
                 raise
             except RunAbort as exc:
-                application_status = (
-                    "interrupted" if exc.failure.kind is FailureKind.INTERRUPTED else "failed"
-                )
+                application_status = "interrupted" if exc.failure.kind is FailureKind.INTERRUPTED else "failed"
                 row["application"] = _application_payload(item, application_status)
                 _persist_metadata(
                     metadata_path,

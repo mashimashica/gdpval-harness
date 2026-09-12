@@ -186,7 +186,9 @@ class ReliabilityExecutor(Executor):
                 None
                 if successful
                 else Failure(
-                    FailureKind.INTERRUPTED if self.result_status is ExecutionStatus.INTERRUPTED else FailureKind.PROCESS,
+                    FailureKind.INTERRUPTED
+                    if self.result_status is ExecutionStatus.INTERRUPTED
+                    else FailureKind.PROCESS,
                     "interrupted" if self.result_status is ExecutionStatus.INTERRUPTED else "test_failure",
                     FailureImpact.RUN,
                 )
@@ -1199,7 +1201,9 @@ class GenericRunnerReliabilityTests(unittest.TestCase):
                         out_dir=root / "out",
                         limit=1,
                     )
-                self.assertEqual(str(raised.exception), "interrupted" if status is ExecutionStatus.INTERRUPTED else "test_failure")
+                self.assertEqual(
+                    str(raised.exception), "interrupted" if status is ExecutionStatus.INTERRUPTED else "test_failure"
+                )
                 self.assertEqual(evaluator.calls, 0)
                 row = json.loads((root / "out" / "results.jsonl").read_text(encoding="utf-8").splitlines()[0])
                 self.assertEqual(row["evaluation"]["status"], "skipped")
@@ -1214,7 +1218,9 @@ class GenericRunnerReliabilityTests(unittest.TestCase):
                     {"kind": expected_kind, "code": expected_code, "impact": "run"},
                 )
                 metadata = json.loads((root / "out" / "run-metadata.json").read_text(encoding="utf-8"))
-                self.assertEqual(metadata["status"], "interrupted" if status is ExecutionStatus.INTERRUPTED else "failed")
+                self.assertEqual(
+                    metadata["status"], "interrupted" if status is ExecutionStatus.INTERRUPTED else "failed"
+                )
 
 
 class ProvenanceReliabilityTests(unittest.TestCase):

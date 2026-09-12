@@ -326,9 +326,7 @@ class ExecutorAdapterFailureTests(unittest.TestCase):
                 frozenset({ExecutorOutput.FINAL_TEXT, ExecutorOutput.ARTIFACT_FILES}),
             )
             self.assertEqual(no_deliverable.output_text, "no artifact\n")
-            empty_final = executor.execute(
-                _execution_request(root / "empty-final", {"FAKE_MODE": "empty-final"})
-            )
+            empty_final = executor.execute(_execution_request(root / "empty-final", {"FAKE_MODE": "empty-final"}))
             self.assertEqual(empty_final.status, ExecutionStatus.COMPLETED)
             self.assertEqual(empty_final.output_text, "")
             self.assertEqual(
