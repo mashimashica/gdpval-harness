@@ -28,7 +28,7 @@ from gdpval_harness.provenance import (
 )
 
 
-_SHA1 = "0123456789abcdef0123456789abcdef01234567"
+_SHA1 = "0123456789abcdef0123456789abcdef01234567"  # pragma: allowlist secret
 _SHA256 = "0123456789abcdef" * 4
 
 
