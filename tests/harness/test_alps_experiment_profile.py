@@ -13,8 +13,8 @@ from eval_harness.experiments.profile import load_experiment_profile
 
 _REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 _PROFILE_PATH = _REPOSITORY_ROOT / "config/experiments/alps-skill-creation.json"
-_ALPS_HEAD = "cf31ca93a1b5379e2ddbd430f9ea416192fb6797"
-_ALPS_BUNDLE_SHA256 = "1feb183fb6e01f7b48469c3669968df0741d93ddde428cfaad6e05350c2f28c4"
+_ALPS_HEAD = "cf31ca93a1b5379e2ddbd430f9ea416192fb6797"  # pragma: allowlist secret
+_ALPS_BUNDLE_SHA256 = "1feb183fb6e01f7b48469c3669968df0741d93ddde428cfaad6e05350c2f28c4"  # pragma: allowlist secret
 _SKILL_CREATOR_FILES = (
     "SKILL.md",
     "references/openai_yaml.md",
