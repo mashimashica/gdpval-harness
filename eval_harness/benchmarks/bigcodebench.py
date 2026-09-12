@@ -3,12 +3,12 @@
 
 from __future__ import annotations
 
-import json
 import subprocess
 import sys
 from pathlib import Path
 
 from eval_harness.benchmarks.base import Benchmark, BenchmarkTask
+from eval_harness.benchmarks.snapshot import Availability, SnapshotTaskContent, _decode_json_object
 from eval_harness.executors.base import TaskSpec
 
 
@@ -17,7 +17,10 @@ _PROMPT = "Generate an executable Python function generated from the given promp
 
 class BigCodeBenchBenchmark(Benchmark):
     name = "bigcodebench"
+    source = "huggingface:bigcode/bigcodebench-hard"
+    source_availability = Availability.AVAILABLE
     revision = "v0.1.4"
+    revision_availability = Availability.AVAILABLE
 
     def __init__(
         self,
@@ -32,6 +35,9 @@ class BigCodeBenchBenchmark(Benchmark):
 
     def is_prepared(self) -> bool:
         return self.dataset_path.is_file()
+
+    def snapshot_source_paths(self) -> tuple[Path, ...]:
+        return (self.dataset_path,)
 
     def prepare(self) -> None:
         if self.is_prepared():
@@ -50,18 +56,20 @@ class BigCodeBenchBenchmark(Benchmark):
             for line in handle:
                 if not line.strip():
                     continue
-                row = json.loads(line)
+                row = _decode_json_object(line, label="BigCodeBench dataset row")
                 verifier_metadata = row.get("verifier_metadata")
                 if not isinstance(verifier_metadata, dict):
                     raise RuntimeError("BigCodeBench task is missing verifier_metadata")
                 for key in ("task_id", "test", "entry_point", "code_prompt"):
-                    if key not in verifier_metadata:
+                    if type(verifier_metadata.get(key)) is not str:
                         raise RuntimeError(f"BigCodeBench verifier_metadata is missing {key}")
-                question = str(row["question"])
+                question = row.get("question")
+                if type(question) is not str:
+                    raise RuntimeError("BigCodeBench question must be a string")
                 tasks.append(
                     BenchmarkTask(
                         execution=TaskSpec(
-                            task_id=str(verifier_metadata["task_id"]),
+                            task_id=verifier_metadata["task_id"],
                             prompt=_PROMPT.format(question=question),
                         ),
                         evaluation=dict(verifier_metadata),
@@ -77,3 +85,7 @@ class BigCodeBenchBenchmark(Benchmark):
         del task
         workspace.mkdir(parents=True, exist_ok=True)
         return []
+
+    def snapshot_task(self, task: BenchmarkTask, workspace: Path) -> SnapshotTaskContent:
+        del workspace
+        return SnapshotTaskContent(evaluation_data=dict(task.evaluation))
