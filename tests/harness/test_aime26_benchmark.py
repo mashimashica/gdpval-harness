@@ -10,9 +10,11 @@ from pathlib import Path
 from unittest.mock import patch
 
 from eval_harness.benchmarks.aime26 import AIME26Benchmark
+from eval_harness.capabilities import ExecutorOutput
 from eval_harness.evaluators.aime26 import AIME26Evaluator
 from eval_harness.evaluators.base import EvaluationCandidate, EvaluationRequest, EvaluationStatus, EvaluatorType
 from eval_harness.executors.base import ExecutionResult, ExecutionStatus
+from eval_harness.failures import Failure, FailureImpact, FailureKind
 
 
 class AIME26BenchmarkTests(unittest.TestCase):
@@ -30,6 +32,9 @@ class AIME26BenchmarkTests(unittest.TestCase):
         output_text: str | None,
         status: ExecutionStatus = ExecutionStatus.NO_DELIVERABLE,
     ) -> ExecutionResult:
+        effective_output = (
+            output_text if status in {ExecutionStatus.COMPLETED, ExecutionStatus.NO_DELIVERABLE} else None
+        )
         return ExecutionResult(
             task_id="aime26-01",
             executor="codex",
@@ -41,8 +46,12 @@ class AIME26BenchmarkTests(unittest.TestCase):
             status=status,
             started_at="2026-09-11T00:00:00+00:00",
             finished_at="2026-09-11T00:00:01+00:00",
-            exit_code=0 if status is ExecutionStatus.NO_DELIVERABLE else 1,
-            output_text=output_text,
+            exit_code=0 if status in {ExecutionStatus.COMPLETED, ExecutionStatus.NO_DELIVERABLE} else 1,
+            available_outputs=frozenset({ExecutorOutput.FINAL_TEXT}) if effective_output is not None else frozenset(),
+            failure=None
+            if effective_output is not None
+            else Failure(FailureKind.PROCESS, "test_failure", FailureImpact.RUN),
+            output_text=effective_output,
         )
 
     def request(self, root: Path, result: ExecutionResult, expected: str = "42") -> EvaluationRequest:

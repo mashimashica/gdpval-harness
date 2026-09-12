@@ -10,6 +10,7 @@ import subprocess
 from datetime import datetime, timezone
 from typing import Mapping
 
+from eval_harness.capabilities import ExecutorCapabilities, ExecutorInput, ExecutorOutput
 from eval_harness.executors.base import (
     ExecutionRequest,
     ExecutionResult,
@@ -17,6 +18,7 @@ from eval_harness.executors.base import (
     Executor,
     PreflightResult,
 )
+from eval_harness.failures import Failure, FailureImpact, FailureKind
 
 
 _API_AND_CLOUD_ENV_VARS = {
@@ -55,6 +57,10 @@ class ClaudeCodeExecutor(Executor):
     name = "claude-code"
     invocation_mode = "claude -p"
     tool_permission_mode = "acceptEdits + restricted built-in tools + fail-closed Bash sandbox"
+    capabilities = ExecutorCapabilities(
+        inputs=frozenset({ExecutorInput.PROMPT_TEXT, ExecutorInput.WORKSPACE_FILES}),
+        outputs=frozenset({ExecutorOutput.ARTIFACT_FILES}),
+    )
 
     def __init__(
         self,
@@ -209,6 +215,8 @@ class ClaudeCodeExecutor(Executor):
         status = ExecutionStatus.FAILED
         stdout = ""
         stderr = ""
+        has_deliverable = False
+        failure: Failure | None = None
 
         try:
             completed = subprocess.run(
@@ -228,16 +236,20 @@ class ClaudeCodeExecutor(Executor):
             if exit_code == 0:
                 has_deliverable = any(path.is_file() for path in request.deliverables_dir.rglob("*"))
                 status = ExecutionStatus.COMPLETED if has_deliverable else ExecutionStatus.NO_DELIVERABLE
+            else:
+                failure = Failure(FailureKind.PROCESS, "process_exit", FailureImpact.RUN)
         except subprocess.TimeoutExpired as exc:
             stdout = _text(exc.stdout)
             stderr = _text(exc.stderr)
             status = ExecutionStatus.TIMED_OUT
+            failure = Failure(FailureKind.TIMEOUT, "timeout", FailureImpact.RUN)
         except KeyboardInterrupt:
             status = ExecutionStatus.INTERRUPTED
-            raise
+            failure = Failure(FailureKind.INTERRUPTED, "interrupted", FailureImpact.RUN)
         except OSError as exc:
             stderr = str(exc) + "\n"
             status = ExecutionStatus.FAILED
+            failure = Failure(FailureKind.PROCESS, "process_spawn", FailureImpact.RUN)
         finally:
             stdout_path.write_text(stdout, encoding="utf-8")
             stderr_path.write_text(stderr, encoding="utf-8")
@@ -254,6 +266,8 @@ class ClaudeCodeExecutor(Executor):
             started_at=started_at,
             finished_at=_utc_now(),
             exit_code=exit_code,
+            available_outputs=frozenset({ExecutorOutput.ARTIFACT_FILES}) if failure is None else frozenset(),
+            failure=failure,
             metadata={
                 "safe_mode": True,
                 "sandbox": "enabled-fail-closed",

@@ -11,14 +11,16 @@ import subprocess
 import tempfile
 import unittest
 from collections.abc import Iterator, Mapping
-from dataclasses import FrozenInstanceError
+from dataclasses import FrozenInstanceError, replace
 from pathlib import Path
 from subprocess import CompletedProcess
 from typing import cast
 from unittest.mock import patch
 
 import eval_harness.provenance as provenance_module
+from eval_harness.capabilities import ExecutorOutput
 from eval_harness.executors.base import ExecutionResult, ExecutionStatus, TaskSpec
+from eval_harness.failures import Failure, FailureImpact, FailureKind
 from eval_harness.provenance import (
     RepositoryProvenance,
     canonical_json_sha256,
@@ -226,6 +228,8 @@ class ProvenanceTests(unittest.TestCase):
             started_at="2026-01-01T00:00:00Z",
             finished_at="2026-01-01T00:00:01Z",
             exit_code=0,
+            available_outputs=frozenset({ExecutorOutput.FINAL_TEXT}),
+            failure=None,
             output_text="secret output text",
             metadata=_ForbiddenMapping(),
         )
@@ -246,6 +250,8 @@ class ProvenanceTests(unittest.TestCase):
                 "finished_at",
                 "exit_code",
                 "output_text_present",
+                "available_outputs",
+                "failure",
                 "metadata",
             },
         )
@@ -253,11 +259,33 @@ class ProvenanceTests(unittest.TestCase):
         self.assertEqual(record["workspace"], "/private/workspace")
         self.assertEqual(record["deliverables_dir"], "/private/deliverables")
         self.assertTrue(record["output_text_present"])
+        self.assertEqual(record["available_outputs"], [ExecutorOutput.FINAL_TEXT.value])
+        self.assertIsNone(record["failure"])
         self.assertEqual(record["metadata"], {})
         for forbidden_key in ("task_id", "environment", "command", "credential", "credentials", "output_text"):
             self.assertNotIn(forbidden_key, record)
         self.assertNotIn("secret-task-id", repr(record))
         self.assertNotIn("secret output text", repr(record))
+
+        empty_record = execution_record(replace(result, output_text=""))
+        self.assertTrue(empty_record["output_text_present"])
+
+        failed = replace(
+            result,
+            status=ExecutionStatus.FAILED,
+            exit_code=1,
+            available_outputs=frozenset(),
+            failure=Failure(FailureKind.PROCESS, "process_exit", FailureImpact.RUN),
+            output_text=None,
+            metadata={"stderr": "secret diagnostic"},
+        )
+        failed_record = execution_record(failed)
+        self.assertEqual(
+            failed_record["failure"],
+            {"kind": "process", "code": "process_exit", "impact": "run"},
+        )
+        self.assertEqual(failed_record["available_outputs"], [])
+        self.assertNotIn("secret diagnostic", repr(failed_record))
 
         with self.assertRaises(TypeError):
             # Preserve the invalid runtime object at the execution record boundary.

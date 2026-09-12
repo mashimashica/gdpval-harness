@@ -8,15 +8,19 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from eval_harness.capabilities import ExecutorOutput
 from eval_harness.evaluators.base import EvaluationCandidate, EvaluationPlan, EvaluationRequest, EvaluationStatus
 from eval_harness.evaluators.gdpval import GDPvalExternalEvaluator
 from eval_harness.executors.base import ExecutionResult, ExecutionStatus
+from eval_harness.failures import Failure, FailureImpact, FailureKind
 
 
 def _execution(root: Path, *, status: ExecutionStatus = ExecutionStatus.COMPLETED) -> ExecutionResult:
     workspace = root / "workspace"
     deliverables = workspace / "deliverables"
     deliverables.mkdir(parents=True, exist_ok=True)
+    successful = status in {ExecutionStatus.COMPLETED, ExecutionStatus.NO_DELIVERABLE}
+    output_text = "answer" if successful else None
     return ExecutionResult(
         task_id="task/x",
         executor="fake",
@@ -28,8 +32,10 @@ def _execution(root: Path, *, status: ExecutionStatus = ExecutionStatus.COMPLETE
         status=status,
         started_at="2026-09-11T00:00:00+00:00",
         finished_at="2026-09-11T00:00:01+00:00",
-        exit_code=0 if status in {ExecutionStatus.COMPLETED, ExecutionStatus.NO_DELIVERABLE} else 1,
-        output_text="answer",
+        exit_code=0 if successful else 1,
+        available_outputs=frozenset({ExecutorOutput.FINAL_TEXT}) if output_text is not None else frozenset(),
+        failure=None if successful else Failure(FailureKind.PROCESS, "test_failure", FailureImpact.RUN),
+        output_text=output_text,
     )
 
 

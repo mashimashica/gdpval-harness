@@ -19,10 +19,12 @@ import eval_harness.executors.codex as codex_executor_module
 import eval_harness.executors.cursor as cursor_executor_module
 import eval_harness.judges.claude_code as claude_judge_module
 import eval_harness.judges.codex as codex_judge_module
+from eval_harness.capabilities import ExecutorOutput
 from eval_harness.executors.base import ExecutionRequest, ExecutionStatus, TaskSpec
 from eval_harness.executors.claude_code import ClaudeCodeExecutor
 from eval_harness.executors.codex import CodexExecutor
 from eval_harness.executors.cursor import CursorExecutor
+from eval_harness.failures import FailureImpact, FailureKind
 from eval_harness.judges.base import JudgeRequest, Verdict
 from eval_harness.judges.claude_code import ClaudeCodeJudgeExecutor
 from eval_harness.judges.codex import (
@@ -401,6 +403,13 @@ class ExecutorReliabilityTests(unittest.TestCase):
                     self.assertEqual(result.status, ExecutionStatus.COMPLETED)
                     self.assertEqual(result.exit_code, 0)
                     self.assertEqual(result.task_id, "task-1")
+                    expected_outputs = (
+                        {ExecutorOutput.FINAL_TEXT, ExecutorOutput.ARTIFACT_FILES}
+                        if name == "codex"
+                        else {ExecutorOutput.ARTIFACT_FILES}
+                    )
+                    self.assertEqual(result.available_outputs, frozenset(expected_outputs))
+                    self.assertIsNone(result.failure)
                     self.assertTrue((request.executor_dir / "prompt.txt").is_file())
                     self.assertIn("\ufffd", (request.executor_dir / "stdout.log").read_text(encoding="utf-8"))
                     self.assertIn("\ufffd", (request.executor_dir / "stderr.log").read_text(encoding="utf-8"))
@@ -436,7 +445,15 @@ class ExecutorReliabilityTests(unittest.TestCase):
                     result = executor.execute(
                         _execution_request(no_output_root, _local_environment(GDPVAL_FAKE_MODE="no-deliverable"))
                     )
-                    self.assertEqual(result.status, ExecutionStatus.NO_DELIVERABLE)
+                    expected_status = ExecutionStatus.COMPLETED if name == "codex" else ExecutionStatus.NO_DELIVERABLE
+                    self.assertEqual(result.status, expected_status)
+                    expected_outputs = (
+                        {ExecutorOutput.FINAL_TEXT, ExecutorOutput.ARTIFACT_FILES}
+                        if name == "codex"
+                        else {ExecutorOutput.ARTIFACT_FILES}
+                    )
+                    self.assertEqual(result.available_outputs, frozenset(expected_outputs))
+                    self.assertIsNone(result.failure)
                     failed_root = root / f"{name}-failed"
                     executor = executor_factory(command=str(command))
                     executor._version = "fake-version"
@@ -448,6 +465,12 @@ class ExecutorReliabilityTests(unittest.TestCase):
                     )
                     self.assertEqual(result.status, ExecutionStatus.FAILED)
                     self.assertEqual(result.exit_code, 3)
+                    self.assertEqual(result.available_outputs, frozenset())
+                    self.assertIsNotNone(result.failure)
+                    assert result.failure is not None
+                    self.assertEqual(result.failure.kind, FailureKind.PROCESS)
+                    self.assertEqual(result.failure.impact, FailureImpact.RUN)
+                    self.assertIsNone(result.output_text)
 
     def test_cursor_reference_mutation_fails_closed_and_restores_isolation(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -461,6 +484,12 @@ class ExecutorReliabilityTests(unittest.TestCase):
             executor._version = "fake-version"
             result = executor.execute(request)
             self.assertEqual(result.status, ExecutionStatus.FAILED)
+            self.assertEqual(result.available_outputs, frozenset())
+            self.assertIsNotNone(result.failure)
+            assert result.failure is not None
+            self.assertEqual(result.failure.kind, FailureKind.INTEGRITY)
+            self.assertEqual(result.failure.impact, FailureImpact.RUN)
+            self.assertIsNone(result.output_text)
             self.assertFalse(result.metadata["reference_integrity_verified"])
             self.assertIn("mutation", (request.executor_dir / "stderr.log").read_text(encoding="utf-8"))
             self.assertEqual((references / "input.txt").read_text(encoding="utf-8"), "mutated\n")
@@ -520,6 +549,12 @@ class ExecutorReliabilityTests(unittest.TestCase):
                     result = executor.execute(request)
                 run.assert_called_once()
                 self.assertEqual(result.status, ExecutionStatus.TIMED_OUT)
+                self.assertEqual(result.available_outputs, frozenset())
+                self.assertIsNotNone(result.failure)
+                assert result.failure is not None
+                self.assertEqual(result.failure.kind, FailureKind.TIMEOUT)
+                self.assertEqual(result.failure.impact, FailureImpact.RUN)
+                self.assertIsNone(result.output_text)
                 _assert_logs(self, request.executor_dir, "out \ufffd\n", "err \ufffd\n")
 
                 interrupted_root = root / "interrupt"
@@ -527,8 +562,14 @@ class ExecutorReliabilityTests(unittest.TestCase):
                 executor._version = "fake-version"
                 request = _execution_request(interrupted_root)
                 with patch.object(subprocess, "run", side_effect=KeyboardInterrupt):
-                    with self.assertRaises(KeyboardInterrupt):
-                        executor.execute(request)
+                    result = executor.execute(request)
+                self.assertEqual(result.status, ExecutionStatus.INTERRUPTED)
+                self.assertEqual(result.available_outputs, frozenset())
+                self.assertIsNone(result.output_text)
+                self.assertIsNotNone(result.failure)
+                assert result.failure is not None
+                self.assertEqual(result.failure.kind, FailureKind.INTERRUPTED)
+                self.assertEqual(result.failure.impact, FailureImpact.RUN)
                 _assert_logs(self, request.executor_dir, "", "")
 
                 failed_root = root / "oserror"
@@ -538,6 +579,12 @@ class ExecutorReliabilityTests(unittest.TestCase):
                 with patch.object(subprocess, "run", side_effect=OSError("launch failed")):
                     result = executor.execute(request)
                 self.assertEqual(result.status, ExecutionStatus.FAILED)
+                self.assertEqual(result.available_outputs, frozenset())
+                self.assertIsNotNone(result.failure)
+                assert result.failure is not None
+                self.assertEqual(result.failure.kind, FailureKind.PROCESS)
+                self.assertEqual(result.failure.impact, FailureImpact.RUN)
+                self.assertIsNone(result.output_text)
                 self.assertIn("launch failed", (request.executor_dir / "stderr.log").read_text(encoding="utf-8"))
 
     def test_build_commands_preserve_reasoning_and_network_policy_options(self) -> None:

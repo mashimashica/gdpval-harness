@@ -18,6 +18,7 @@ import eval_harness.local_runner as local_runner
 import eval_harness.provenance as provenance
 import eval_harness.runner as generic_runner
 from eval_harness.benchmarks.base import Benchmark, BenchmarkTask
+from eval_harness.capabilities import ExecutorOutput
 from eval_harness.evaluators.base import (
     EvaluationPlan,
     EvaluationRequest,
@@ -35,6 +36,7 @@ from eval_harness.executors.base import (
     PreflightResult,
     TaskSpec,
 )
+from eval_harness.failures import Failure, FailureImpact, FailureKind, RunAbort
 from eval_harness.interventions.base import (
     ApplicationMapping,
     Intervention,
@@ -165,6 +167,8 @@ class ReliabilityExecutor(Executor):
             raise self.execute_error
         request.executor_dir.mkdir(parents=True, exist_ok=True)
         (request.executor_dir / "stdout.log").write_text("executor output\n", encoding="utf-8")
+        successful = self.result_status in {ExecutionStatus.COMPLETED, ExecutionStatus.NO_DELIVERABLE}
+        output_text = "executor output" if successful else None
         return ExecutionResult(
             task_id=self.result_task_id or request.task.task_id,
             executor=self.result_executor or self.name,
@@ -176,8 +180,20 @@ class ReliabilityExecutor(Executor):
             status=self.result_status,
             started_at="2026-09-11T00:00:00+00:00",
             finished_at="2026-09-11T00:00:01+00:00",
-            exit_code=0,
-            output_text="executor output",
+            exit_code=0 if successful else 1,
+            available_outputs=frozenset({ExecutorOutput.FINAL_TEXT}) if output_text is not None else frozenset(),
+            failure=(
+                None
+                if successful
+                else Failure(
+                    FailureKind.INTERRUPTED
+                    if self.result_status is ExecutionStatus.INTERRUPTED
+                    else FailureKind.PROCESS,
+                    "interrupted" if self.result_status is ExecutionStatus.INTERRUPTED else "test_failure",
+                    FailureImpact.RUN,
+                )
+            ),
+            output_text=output_text,
         )
 
 
@@ -422,6 +438,8 @@ class RunnerReliabilityTests(unittest.TestCase):
                 started_at="start",
                 finished_at="finish",
                 exit_code=0,
+                available_outputs=frozenset(),
+                failure=None,
                 reasoning_effort_requested="high",
             )
             copied = local_runner._copy_final_deliverables(layout, result)
@@ -967,6 +985,8 @@ class GenericRunnerReliabilityTests(unittest.TestCase):
             started_at="start",
             finished_at="finish",
             exit_code=0,
+            available_outputs=frozenset(),
+            failure=None,
         )
 
     def test_runner_atomic_records_and_path_guards(self) -> None:
@@ -1165,6 +1185,42 @@ class GenericRunnerReliabilityTests(unittest.TestCase):
             self.assertEqual(metadata["status"], "interrupted")
             row = json.loads((root / "interrupt" / "results.jsonl").read_text().splitlines()[0])
             self.assertEqual(row["evaluation"]["status"], "interrupted")
+
+    def test_runner_stops_before_evaluation_for_systemic_executor_failures(self) -> None:
+        for status in (ExecutionStatus.FAILED, ExecutionStatus.TIMED_OUT, ExecutionStatus.INTERRUPTED):
+            with self.subTest(status=status), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                evaluator = ReliabilityEvaluator()
+                executor = ReliabilityExecutor()
+                executor.result_status = status
+                with self.assertRaises(RunAbort) as raised:
+                    generic_runner.run_benchmark(
+                        ReliabilityBenchmark(),
+                        evaluator,
+                        executor,
+                        out_dir=root / "out",
+                        limit=1,
+                    )
+                self.assertEqual(
+                    str(raised.exception), "interrupted" if status is ExecutionStatus.INTERRUPTED else "test_failure"
+                )
+                self.assertEqual(evaluator.calls, 0)
+                row = json.loads((root / "out" / "results.jsonl").read_text(encoding="utf-8").splitlines()[0])
+                self.assertEqual(row["evaluation"]["status"], "skipped")
+                self.assertEqual(row["evaluation"]["metrics"], {})
+                self.assertEqual(row["evaluation"]["outcomes"], {})
+                self.assertEqual(row["evaluation"]["details"], {"reason": "executor failure prevented evaluation"})
+                self.assertEqual(row["execution"]["available_outputs"], [])
+                expected_kind = "interrupted" if status is ExecutionStatus.INTERRUPTED else "process"
+                expected_code = "interrupted" if status is ExecutionStatus.INTERRUPTED else "test_failure"
+                self.assertEqual(
+                    row["execution"]["failure"],
+                    {"kind": expected_kind, "code": expected_code, "impact": "run"},
+                )
+                metadata = json.loads((root / "out" / "run-metadata.json").read_text(encoding="utf-8"))
+                self.assertEqual(
+                    metadata["status"], "interrupted" if status is ExecutionStatus.INTERRUPTED else "failed"
+                )
 
 
 class ProvenanceReliabilityTests(unittest.TestCase):

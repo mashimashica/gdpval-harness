@@ -85,6 +85,8 @@ class _CapturingLocalExecutor:
             started_at="started",
             finished_at="finished",
             exit_code=0,
+            available_outputs=frozenset(),
+            failure=None,
         )
 
 

@@ -9,6 +9,7 @@ from dataclasses import FrozenInstanceError
 from pathlib import Path
 from typing import cast
 
+from eval_harness.capabilities import ExecutorOutput
 from eval_harness.evaluators.aime26 import AIME26Evaluator
 from eval_harness.evaluators.base import (
     EvaluationCandidate,
@@ -39,6 +40,8 @@ def _result(root: Path, task_id: str = "task") -> ExecutionResult:
         started_at="2026-01-01T00:00:00+00:00",
         finished_at="2026-01-01T00:00:01+00:00",
         exit_code=0,
+        available_outputs=frozenset({ExecutorOutput.FINAL_TEXT}),
+        failure=None,
         output_text="  answer  ",
     )
 

@@ -10,6 +10,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Mapping
 
+from eval_harness.capabilities import ExecutorCapabilities, ExecutorInput, ExecutorOutput
 from eval_harness.executors.base import (
     ExecutionRequest,
     ExecutionResult,
@@ -17,6 +18,7 @@ from eval_harness.executors.base import (
     Executor,
     PreflightResult,
 )
+from eval_harness.failures import Failure, FailureImpact, FailureKind
 from eval_harness.reasoning import ReasoningEffortOption, validate_reasoning_effort
 
 
@@ -60,6 +62,10 @@ class CodexExecutor(Executor):
     name = "codex"
     invocation_mode = "codex exec"
     tool_permission_mode = "workspace-write + approval_policy=never"
+    capabilities = ExecutorCapabilities(
+        inputs=frozenset({ExecutorInput.PROMPT_TEXT, ExecutorInput.WORKSPACE_FILES}),
+        outputs=frozenset({ExecutorOutput.FINAL_TEXT, ExecutorOutput.ARTIFACT_FILES}),
+    )
 
     def __init__(
         self,
@@ -210,6 +216,8 @@ class CodexExecutor(Executor):
         status = ExecutionStatus.FAILED
         stdout = ""
         stderr = ""
+        has_deliverable = False
+        failure: Failure | None = None
 
         try:
             completed = subprocess.run(
@@ -230,22 +238,39 @@ class CodexExecutor(Executor):
                 has_deliverable = request.deliverables_dir.is_dir() and any(
                     path.is_file() for path in request.deliverables_dir.rglob("*")
                 )
-                status = ExecutionStatus.COMPLETED if has_deliverable else ExecutionStatus.NO_DELIVERABLE
+            else:
+                failure = Failure(FailureKind.PROCESS, "process_exit", FailureImpact.RUN)
         except subprocess.TimeoutExpired as exc:
             stdout = _text(exc.stdout)
             stderr = _text(exc.stderr)
             status = ExecutionStatus.TIMED_OUT
+            failure = Failure(FailureKind.TIMEOUT, "timeout", FailureImpact.RUN)
         except KeyboardInterrupt:
             status = ExecutionStatus.INTERRUPTED
-            raise
+            failure = Failure(FailureKind.INTERRUPTED, "interrupted", FailureImpact.RUN)
         except OSError as exc:
             stderr = str(exc) + "\n"
             status = ExecutionStatus.FAILED
+            failure = Failure(FailureKind.PROCESS, "process_spawn", FailureImpact.RUN)
         finally:
             stdout_path.write_text(stdout, encoding="utf-8")
             stderr_path.write_text(stderr, encoding="utf-8")
 
-        output_text = _read_output_text(final_message_path)
+        output_text = _read_output_text(final_message_path) if failure is None else None
+        if failure is None:
+            status = (
+                ExecutionStatus.COMPLETED
+                if output_text is not None or has_deliverable
+                else ExecutionStatus.NO_DELIVERABLE
+            )
+        available_outputs: frozenset[ExecutorOutput] = frozenset(
+            output
+            for output, present in (
+                (ExecutorOutput.FINAL_TEXT, output_text is not None),
+                (ExecutorOutput.ARTIFACT_FILES, failure is None),
+            )
+            if present
+        )
         metadata = {
             "sandbox": "workspace-write",
             "tool_permission_mode": self.tool_permission_mode,
@@ -273,6 +298,8 @@ class CodexExecutor(Executor):
             started_at=started_at,
             finished_at=_utc_now(),
             exit_code=exit_code,
+            available_outputs=available_outputs,
+            failure=failure,
             output_text=output_text,
             metadata=metadata,
             reasoning_effort_requested=reasoning_effort,

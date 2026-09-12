@@ -12,6 +12,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Mapping
 
+from eval_harness.capabilities import ExecutorCapabilities, ExecutorInput, ExecutorOutput
 from eval_harness.executors.base import (
     ExecutionRequest,
     ExecutionResult,
@@ -19,6 +20,7 @@ from eval_harness.executors.base import (
     Executor,
     PreflightResult,
 )
+from eval_harness.failures import Failure, FailureImpact, FailureKind
 
 
 _API_ENV_VARS = {"CURSOR_API_KEY", "CURSOR_AUTH_TOKEN"}
@@ -64,6 +66,10 @@ class CursorExecutor(Executor):
     name = "cursor"
     invocation_mode = "agent -p"
     tool_permission_mode = "project allowlist + Cursor sandbox"
+    capabilities = ExecutorCapabilities(
+        inputs=frozenset({ExecutorInput.PROMPT_TEXT, ExecutorInput.WORKSPACE_FILES}),
+        outputs=frozenset({ExecutorOutput.ARTIFACT_FILES}),
+    )
 
     def __init__(self, *, network_enabled: bool = False, command: str | None = None) -> None:
         self.network_enabled = network_enabled
@@ -259,6 +265,8 @@ class CursorExecutor(Executor):
         stdout = ""
         stderr = ""
         reference_integrity_ok = True
+        has_deliverable = False
+        failure: Failure | None = None
 
         try:
             completed = subprocess.run(
@@ -278,6 +286,9 @@ class CursorExecutor(Executor):
                 reference_integrity_ok = _tree_digest(protected_references) == reference_digest
                 if not reference_integrity_ok:
                     stderr += "\nCursor executor detected reference-file mutation; failing closed.\n"
+                    failure = Failure(FailureKind.INTEGRITY, "reference_mutation", FailureImpact.RUN)
+            if exit_code != 0 and failure is None:
+                failure = Failure(FailureKind.PROCESS, "process_exit", FailureImpact.RUN)
             if exit_code == 0 and reference_integrity_ok:
                 has_deliverable = any(path.is_file() for path in request.deliverables_dir.rglob("*"))
                 status = ExecutionStatus.COMPLETED if has_deliverable else ExecutionStatus.NO_DELIVERABLE
@@ -285,17 +296,22 @@ class CursorExecutor(Executor):
             stdout = _text(exc.stdout)
             stderr = _text(exc.stderr)
             status = ExecutionStatus.TIMED_OUT
+            failure = Failure(FailureKind.TIMEOUT, "timeout", FailureImpact.RUN)
         except KeyboardInterrupt:
             status = ExecutionStatus.INTERRUPTED
-            raise
+            failure = Failure(FailureKind.INTERRUPTED, "interrupted", FailureImpact.RUN)
         except OSError as exc:
             stderr = str(exc) + "\n"
             status = ExecutionStatus.FAILED
+            failure = Failure(FailureKind.PROCESS, "process_spawn", FailureImpact.RUN)
         finally:
             self._restore_reference_files(request.workspace, protected_references)
             stdout_path.write_text(stdout, encoding="utf-8")
             stderr_path.write_text(stderr, encoding="utf-8")
 
+        available_outputs: frozenset[ExecutorOutput] = frozenset(
+            {ExecutorOutput.ARTIFACT_FILES} if failure is None else ()
+        )
         return ExecutionResult(
             task_id=request.task.task_id,
             executor=self.name,
@@ -308,6 +324,8 @@ class CursorExecutor(Executor):
             started_at=started_at,
             finished_at=_utc_now(),
             exit_code=exit_code,
+            available_outputs=available_outputs,
+            failure=failure,
             metadata={
                 "sandbox": "enabled/workspace_readwrite",
                 "tool_permission_mode": self.tool_permission_mode,

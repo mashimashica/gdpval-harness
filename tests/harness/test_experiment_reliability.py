@@ -27,6 +27,7 @@ from eval_harness.builders.base import (
 )
 from eval_harness.builders.executor_skill import ExecutorSkillBuilder
 from eval_harness.builders.inputs import load_builder_input_bundle
+from eval_harness.capabilities import ExecutorOutput
 from eval_harness.evaluators.base import (
     EvaluationPlan,
     EvaluationRequest,
@@ -52,6 +53,7 @@ from eval_harness.experiments.base import (
     ExperimentRunSummary,
     LoadedExperimentProfile,
 )
+from eval_harness.failures import Failure, FailureImpact, FailureKind, RunAbort
 from eval_harness.interventions import load_agent_skill_bundle
 from eval_harness.provenance import RepositoryProvenance, canonical_json_sha256
 from eval_harness.runner import RunSummary
@@ -87,6 +89,9 @@ class ReliabilityEvaluator(Evaluator):
     name = "reliability-evaluator"
     evaluator_type = EvaluatorType.BENCHMARK_NATIVE
 
+    def __init__(self) -> None:
+        self.evaluate_calls = 0
+
     def preflight(self, run_dir: Path | None = None) -> EvaluatorPreflightResult:
         del run_dir
         return EvaluatorPreflightResult(self.name, self.evaluator_type, True, version="1")
@@ -95,6 +100,7 @@ class ReliabilityEvaluator(Evaluator):
         del plan
 
     def evaluate(self, request: EvaluationRequest) -> EvaluationResult:
+        self.evaluate_calls += 1
         return EvaluationResult(request.task_id, EvaluationStatus.COMPLETED, metrics={"score": 1.0})
 
 
@@ -121,6 +127,9 @@ class ReliabilityApplicationExecutor(Executor):
         request.deliverables_dir.mkdir(parents=True, exist_ok=True)
         if self.raise_on_execute is not None:
             raise self.raise_on_execute
+        successful = self.status in {ExecutionStatus.COMPLETED, ExecutionStatus.NO_DELIVERABLE}
+        failure_kind = FailureKind.INTERRUPTED if self.status is ExecutionStatus.INTERRUPTED else FailureKind.PROCESS
+        failure_code = "interrupted" if self.status is ExecutionStatus.INTERRUPTED else "test_failure"
         return ExecutionResult(
             task_id=request.task.task_id,
             executor=self.name,
@@ -132,7 +141,9 @@ class ReliabilityApplicationExecutor(Executor):
             status=self.status,
             started_at="2026-09-12T00:00:00+00:00",
             finished_at="2026-09-12T00:00:01+00:00",
-            exit_code=0,
+            exit_code=0 if successful else 1,
+            available_outputs=frozenset(),
+            failure=None if successful else Failure(failure_kind, failure_code, FailureImpact.RUN),
         )
 
 
@@ -168,6 +179,8 @@ class ReliabilityBuilderExecutor(Executor):
             started_at="2026-09-12T00:00:00+00:00",
             finished_at="2026-09-12T00:00:01+00:00",
             exit_code=0,
+            available_outputs=frozenset({ExecutorOutput.ARTIFACT_FILES}),
+            failure=None,
         )
 
 
@@ -541,6 +554,8 @@ class ExperimentReliabilityTests(unittest.TestCase):
                 started_at="start",
                 finished_at="finish",
                 exit_code=0,
+                available_outputs=frozenset({ExecutorOutput.ARTIFACT_FILES}),
+                failure=None,
             )
             request = BuildRequest(
                 "schedule",
@@ -660,7 +675,7 @@ class ExperimentReliabilityTests(unittest.TestCase):
                 )
             self.assertEqual(len(builder_executor.requests), 1)
 
-    def test_builder_experiment_application_failure_persists_partial_state_and_metrics(self) -> None:
+    def test_builder_experiment_application_failure_stops_before_evaluation(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             profile, config, benchmark, evaluator, builder, builder_executor, application, source = self._run_fixture(
@@ -671,20 +686,21 @@ class ExperimentReliabilityTests(unittest.TestCase):
                 patch.object(runner_module.secrets, "token_hex", return_value="schedule-0000000000000002"),
                 patch("eval_harness.runner.secrets.token_urlsafe", return_value="application-run-failed"),
             ):
-                summary = runner_module.run_builder_experiment(
-                    profile,
-                    config,
-                    benchmark,
-                    evaluator,
-                    builder,
-                    application,
-                    source_roots={"input-one": source},
-                    out_dir=root / "output",
-                    runtime_root=root / "runtime",
-                )
+                with self.assertRaises(RunAbort) as raised:
+                    runner_module.run_builder_experiment(
+                        profile,
+                        config,
+                        benchmark,
+                        evaluator,
+                        builder,
+                        application,
+                        source_roots={"input-one": source},
+                        out_dir=root / "output",
+                        runtime_root=root / "runtime",
+                    )
 
-            self.assertEqual(summary.status, "failed")
-            self.assertEqual(summary.completed_applications, 0)
+            self.assertEqual(str(raised.exception), "test_failure")
+            self.assertEqual(evaluator.evaluate_calls, 0)
             self.assertEqual(len(builder_executor.requests), 1)
             self.assertEqual(len(application.requests), 1)
             metadata = json.loads((root / "output" / "experiment-metadata.json").read_text(encoding="utf-8"))
@@ -695,7 +711,59 @@ class ExperimentReliabilityTests(unittest.TestCase):
             output = Path(metadata["entries"][0]["application"]["output_root"])
             row = json.loads((output / "results.jsonl").read_text(encoding="utf-8").splitlines()[0])
             self.assertEqual(row["execution"]["status"], "failed")
-            self.assertEqual(row["evaluation"]["metrics"], {"score": 1.0})
+            self.assertEqual(
+                row["execution"]["failure"],
+                {"kind": "process", "code": "test_failure", "impact": "run"},
+            )
+            self.assertEqual(
+                row["evaluation"],
+                {
+                    "details": {"reason": "executor failure prevented evaluation"},
+                    "metrics": {},
+                    "outcomes": {},
+                    "status": "skipped",
+                },
+            )
+
+    def test_builder_experiment_typed_interrupt_preserves_interrupt_status(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            profile, config, benchmark, evaluator, builder, builder_executor, application, source = self._run_fixture(
+                root,
+                application_status=ExecutionStatus.INTERRUPTED,
+            )
+            with (
+                patch.object(runner_module.secrets, "token_hex", return_value="schedule-0000000000000005"),
+                patch("eval_harness.runner.secrets.token_urlsafe", return_value="application-run-interrupted"),
+            ):
+                with self.assertRaises(RunAbort) as raised:
+                    runner_module.run_builder_experiment(
+                        profile,
+                        config,
+                        benchmark,
+                        evaluator,
+                        builder,
+                        application,
+                        source_roots={"input-one": source},
+                        out_dir=root / "output",
+                        runtime_root=root / "runtime",
+                    )
+
+            self.assertEqual(str(raised.exception), "interrupted")
+            self.assertEqual(evaluator.evaluate_calls, 0)
+            self.assertEqual(len(builder_executor.requests), 1)
+            self.assertEqual(len(application.requests), 1)
+            metadata = json.loads((root / "output" / "experiment-metadata.json").read_text(encoding="utf-8"))
+            self.assertEqual(metadata["status"], "interrupted")
+            self.assertEqual(metadata["entries"][0]["application"]["status"], "interrupted")
+            output = Path(metadata["entries"][0]["application"]["output_root"])
+            row = json.loads((output / "results.jsonl").read_text(encoding="utf-8").splitlines()[0])
+            self.assertEqual(row["execution"]["status"], "interrupted")
+            self.assertEqual(
+                row["execution"]["failure"],
+                {"kind": "interrupted", "code": "interrupted", "impact": "run"},
+            )
+            self.assertEqual(row["evaluation"]["status"], "skipped")
 
     def test_builder_experiment_builder_and_application_exceptions_are_durable(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

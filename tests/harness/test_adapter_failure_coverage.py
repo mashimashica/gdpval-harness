@@ -11,11 +11,13 @@ from pathlib import Path
 from typing import BinaryIO, NoReturn, cast
 from unittest.mock import patch
 
+from eval_harness.capabilities import ExecutorOutput
 from eval_harness.executors.base import ExecutionRequest, ExecutionStatus, TaskSpec
 from eval_harness.executors.claude_code import ClaudeCodeExecutor
 from eval_harness.executors.codex import CodexExecutor
 from eval_harness.executors.cursor import CursorExecutor
 from eval_harness.executors.registry import create_executor, get_executor_descriptor, list_executors, main
+from eval_harness.failures import Failure, FailureImpact, FailureKind
 from eval_harness.judges.base import JudgeRequest
 from eval_harness.judges.claude_code import ClaudeCodeJudgeExecutor
 from eval_harness.judges.codex import CodexJudgeExecutor
@@ -200,14 +202,21 @@ class ExecutorAdapterFailureTests(unittest.TestCase):
             ) as run:
                 no_deliverable = executor.execute(request)
             self.assertEqual(no_deliverable.status, ExecutionStatus.NO_DELIVERABLE)
+            self.assertEqual(no_deliverable.available_outputs, frozenset({ExecutorOutput.ARTIFACT_FILES}))
             self.assertEqual(run.call_args.kwargs["errors"], "replace")
 
             references = request.workspace / "reference_files"
             references.mkdir(parents=True)
             (references / "source.txt").write_text("source", encoding="utf-8")
             with patch("eval_harness.executors.cursor.subprocess.run", side_effect=_raise_interrupt):
-                with self.assertRaises(KeyboardInterrupt):
-                    executor.execute(request)
+                interrupted = executor.execute(request)
+            self.assertEqual(interrupted.status, ExecutionStatus.INTERRUPTED)
+            self.assertEqual(interrupted.available_outputs, frozenset())
+            self.assertIsNone(interrupted.output_text)
+            self.assertIsNotNone(interrupted.failure)
+            assert interrupted.failure is not None
+            self.assertEqual(interrupted.failure.kind, FailureKind.INTERRUPTED)
+            self.assertEqual(interrupted.failure.impact, FailureImpact.RUN)
             self.assertTrue(references.is_dir())
             self.assertEqual((references / "source.txt").read_text(encoding="utf-8"), "source")
 
@@ -290,6 +299,7 @@ class ExecutorAdapterFailureTests(unittest.TestCase):
                             printf 'final \377\n' > "$output"
                             ;;
                         no-deliverable) printf 'no artifact\n' > "$output" ;;
+                        empty-final) : > "$output" ;;
                         nonzero) printf 'failure\n' >&2; exit 7 ;;
                     esac
                 fi
@@ -301,15 +311,33 @@ class ExecutorAdapterFailureTests(unittest.TestCase):
             self.assertEqual(completed.status, ExecutionStatus.COMPLETED)
             self.assertEqual(completed.output_text, "final ÿ\n")
             self.assertEqual(completed.exit_code, 0)
+            self.assertEqual(
+                completed.available_outputs,
+                frozenset({ExecutorOutput.FINAL_TEXT, ExecutorOutput.ARTIFACT_FILES}),
+            )
             self.assertTrue(completed.metadata["cloud_execution"] is False)
 
             no_deliverable = executor.execute(
                 _execution_request(root / "no-deliverable", {"FAKE_MODE": "no-deliverable"})
             )
-            self.assertEqual(no_deliverable.status, ExecutionStatus.NO_DELIVERABLE)
+            self.assertEqual(no_deliverable.status, ExecutionStatus.COMPLETED)
+            self.assertEqual(
+                no_deliverable.available_outputs,
+                frozenset({ExecutorOutput.FINAL_TEXT, ExecutorOutput.ARTIFACT_FILES}),
+            )
+            self.assertEqual(no_deliverable.output_text, "no artifact\n")
+            empty_final = executor.execute(_execution_request(root / "empty-final", {"FAKE_MODE": "empty-final"}))
+            self.assertEqual(empty_final.status, ExecutionStatus.COMPLETED)
+            self.assertEqual(empty_final.output_text, "")
+            self.assertEqual(
+                empty_final.available_outputs,
+                frozenset({ExecutorOutput.FINAL_TEXT, ExecutorOutput.ARTIFACT_FILES}),
+            )
             nonzero = executor.execute(_execution_request(root / "nonzero", {"FAKE_MODE": "nonzero"}))
             self.assertEqual(nonzero.status, ExecutionStatus.FAILED)
             self.assertEqual(nonzero.exit_code, 7)
+            self.assertEqual(nonzero.available_outputs, frozenset())
+            self.assertEqual(nonzero.failure, Failure(FailureKind.PROCESS, "process_exit", FailureImpact.RUN))
 
     def test_codex_execution_timeout_and_interrupt_are_durable(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -321,11 +349,19 @@ class ExecutorAdapterFailureTests(unittest.TestCase):
                 timed_out = executor.execute(request)
             self.assertEqual(timed_out.status, ExecutionStatus.TIMED_OUT)
             self.assertEqual((request.executor_dir / "stdout.log").read_text(), "partial �")
+            self.assertEqual(timed_out.available_outputs, frozenset())
+            self.assertEqual(timed_out.failure, Failure(FailureKind.TIMEOUT, "timeout", FailureImpact.RUN))
             self.assertEqual((request.executor_dir / "stderr.log").read_text(), "error �")
 
             with patch("eval_harness.executors.codex.subprocess.run", side_effect=_raise_interrupt):
-                with self.assertRaises(KeyboardInterrupt):
-                    executor.execute(request)
+                interrupted = executor.execute(request)
+            self.assertEqual(interrupted.status, ExecutionStatus.INTERRUPTED)
+            self.assertEqual(interrupted.available_outputs, frozenset())
+            self.assertIsNone(interrupted.output_text)
+            self.assertIsNotNone(interrupted.failure)
+            assert interrupted.failure is not None
+            self.assertEqual(interrupted.failure.kind, FailureKind.INTERRUPTED)
+            self.assertEqual(interrupted.failure.impact, FailureImpact.RUN)
             self.assertTrue((request.executor_dir / "stdout.log").is_file())
 
     def test_claude_preflight_accepts_subscription_and_rejects_malformed_auth(self) -> None:
@@ -385,21 +421,33 @@ class ExecutorAdapterFailureTests(unittest.TestCase):
             executor._version = "claude fake"
             no_deliverable = executor.execute(_execution_request(root, {"FAKE_MODE": "no-deliverable"}))
             self.assertEqual(no_deliverable.status, ExecutionStatus.NO_DELIVERABLE)
+            self.assertEqual(no_deliverable.available_outputs, frozenset({ExecutorOutput.ARTIFACT_FILES}))
             completed = executor.execute(_execution_request(root, {"FAKE_MODE": "success"}))
             self.assertEqual(completed.status, ExecutionStatus.COMPLETED)
+            self.assertEqual(completed.available_outputs, frozenset({ExecutorOutput.ARTIFACT_FILES}))
             failed = executor.execute(_execution_request(root, {"FAKE_MODE": "nonzero"}))
             self.assertEqual(failed.status, ExecutionStatus.FAILED)
             self.assertEqual(failed.exit_code, 8)
+            self.assertEqual(failed.available_outputs, frozenset())
+            self.assertEqual(failed.failure, Failure(FailureKind.PROCESS, "process_exit", FailureImpact.RUN))
 
             request = _execution_request(root)
             with patch("eval_harness.executors.claude_code.subprocess.run", side_effect=_raise_timeout):
                 timed_out = executor.execute(request)
             self.assertEqual(timed_out.status, ExecutionStatus.TIMED_OUT)
             self.assertEqual((request.executor_dir / "stdout.log").read_text(), "partial �")
+            self.assertEqual(timed_out.available_outputs, frozenset())
+            self.assertEqual(timed_out.failure, Failure(FailureKind.TIMEOUT, "timeout", FailureImpact.RUN))
 
             with patch("eval_harness.executors.claude_code.subprocess.run", side_effect=_raise_interrupt):
-                with self.assertRaises(KeyboardInterrupt):
-                    executor.execute(request)
+                interrupted = executor.execute(request)
+            self.assertEqual(interrupted.status, ExecutionStatus.INTERRUPTED)
+            self.assertEqual(interrupted.available_outputs, frozenset())
+            self.assertIsNone(interrupted.output_text)
+            self.assertIsNotNone(interrupted.failure)
+            assert interrupted.failure is not None
+            self.assertEqual(interrupted.failure.kind, FailureKind.INTERRUPTED)
+            self.assertEqual(interrupted.failure.impact, FailureImpact.RUN)
             failed_executor = ClaudeCodeExecutor(command=str(root / "missing"))
             result = failed_executor.execute(request)
             self.assertEqual(result.status, ExecutionStatus.FAILED)
@@ -468,6 +516,8 @@ class ExecutorAdapterFailureTests(unittest.TestCase):
 
             mutated = executor.execute(_execution_request(root, {"FAKE_MODE": "mutate"}))
             self.assertEqual(mutated.status, ExecutionStatus.FAILED)
+            self.assertEqual(mutated.available_outputs, frozenset())
+            self.assertEqual(mutated.failure, Failure(FailureKind.INTEGRITY, "reference_mutation", FailureImpact.RUN))
             self.assertFalse(mutated.metadata["reference_integrity_verified"])
             self.assertIn("mutation", (root / "executor" / "stderr.log").read_text())
 
@@ -480,9 +530,13 @@ class ExecutorAdapterFailureTests(unittest.TestCase):
             with patch("eval_harness.executors.cursor.subprocess.run", side_effect=_raise_timeout):
                 timed_out = executor.execute(timeout_request)
             self.assertEqual(timed_out.status, ExecutionStatus.TIMED_OUT)
+            self.assertEqual(timed_out.available_outputs, frozenset())
+            self.assertEqual(timed_out.failure, Failure(FailureKind.TIMEOUT, "timeout", FailureImpact.RUN))
             failed_executor = CursorExecutor(command=str(root / "missing"))
             failed = failed_executor.execute(timeout_request)
             self.assertEqual(failed.status, ExecutionStatus.FAILED)
+            self.assertEqual(failed.available_outputs, frozenset())
+            self.assertEqual(failed.failure, Failure(FailureKind.PROCESS, "process_spawn", FailureImpact.RUN))
 
 
 class JudgeAdapterFailureTests(unittest.TestCase):

@@ -208,6 +208,8 @@ class _Executor(Executor):
             started_at="start",
             finished_at="finish",
             exit_code=0,
+            available_outputs=frozenset(),
+            failure=None,
         )
 
 
@@ -1438,6 +1440,8 @@ class InterventionBoundaryTests(unittest.TestCase):
                 started_at="start",
                 finished_at="finish",
                 exit_code=0,
+                available_outputs=frozenset(),
+                failure=None,
             )
             manifest = _manifest()
             valid_bundle = InterventionBundle(artifact_root / "skill", manifest)

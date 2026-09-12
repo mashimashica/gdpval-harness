@@ -15,6 +15,7 @@ from unittest.mock import patch
 
 import eval_harness.runner as runner_module
 from eval_harness.benchmarks.base import Benchmark, BenchmarkTask
+from eval_harness.capabilities import ExecutorOutput
 from eval_harness.evaluators.base import (
     EvaluationPlan,
     EvaluationRequest,
@@ -34,6 +35,7 @@ from eval_harness.executors.base import (
     PreflightResult,
     TaskSpec,
 )
+from eval_harness.failures import Failure, FailureImpact, FailureKind, RunAbort
 from eval_harness.interventions.agent_skill import AgentSkillIntervention, load_agent_skill_bundle
 from eval_harness.interventions.base import (
     ApplicationMapping,
@@ -268,6 +270,7 @@ class FakeExecutor(Executor):
         result_auth_mode: str | None = "fake-local",
         result_metadata: dict[str, object] | None = None,
         result_output_text: str | None = "answer",
+        result_status: ExecutionStatus = ExecutionStatus.NO_DELIVERABLE,
     ) -> None:
         self.calls = 0
         self.fail_on_call = fail_on_call
@@ -282,6 +285,7 @@ class FakeExecutor(Executor):
         self.result_auth_mode = result_auth_mode
         self.result_metadata = result_metadata if result_metadata is not None else {"fake": True}
         self.result_output_text = result_output_text
+        self.result_status = result_status
 
     def preflight(self) -> PreflightResult:
         self.events.append("executor-preflight")
@@ -299,7 +303,14 @@ class FakeExecutor(Executor):
         self.tasks.append(request.task)
         self.environments.append(dict(request.environment))
         failed = self.fail_on_call == self.calls
-        status = ExecutionStatus.FAILED if failed else ExecutionStatus.NO_DELIVERABLE
+        status = (
+            ExecutionStatus.INTERRUPTED
+            if failed and self.result_status is ExecutionStatus.INTERRUPTED
+            else ExecutionStatus.FAILED
+            if failed
+            else self.result_status
+        )
+        output_text = None if failed else self.result_output_text
         request.executor_dir.mkdir(parents=True, exist_ok=True)
         (request.executor_dir / "stdout.log").write_text("fake\n", encoding="utf-8")
         deliverables_dir = request.deliverables_dir
@@ -320,7 +331,17 @@ class FakeExecutor(Executor):
             started_at="2026-09-11T00:00:00+00:00",
             finished_at="2026-09-11T00:00:01+00:00",
             exit_code=1 if failed else 0,
-            output_text=self.result_output_text,
+            available_outputs=frozenset({ExecutorOutput.FINAL_TEXT}) if output_text is not None else frozenset(),
+            failure=(
+                None
+                if not failed
+                else Failure(
+                    FailureKind.INTERRUPTED if status is ExecutionStatus.INTERRUPTED else FailureKind.PROCESS,
+                    "interrupted" if status is ExecutionStatus.INTERRUPTED else "test_failure",
+                    FailureImpact.RUN,
+                )
+            ),
+            output_text=output_text,
             metadata=self.result_metadata,
         )
 
@@ -1074,23 +1095,41 @@ class GenericRunnerTests(unittest.TestCase):
             self.assertEqual(metadata["evaluation_status_counts"], {"failed": 1})
             self.assertNotIn("evaluator test failure", json.dumps(row))
 
-    def test_executor_failure_is_evaluated_then_aborts_remaining_tasks(self) -> None:
+    def test_executor_failure_stops_before_evaluation_and_aborts_run(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             out = Path(tmp) / "run"
             executor = FakeExecutor(fail_on_call=1)
             evaluator = FakeEvaluator()
 
-            summary = run_benchmark(FakeBenchmark(), evaluator, executor, out_dir=out, limit=3)
+            with self.assertRaises(RunAbort) as raised:
+                run_benchmark(FakeBenchmark(), evaluator, executor, out_dir=out, limit=3)
 
-            self.assertEqual(summary.status, "failed")
-            self.assertEqual(summary.task_count, 1)
+            self.assertEqual(str(raised.exception), "test_failure")
             self.assertEqual(executor.calls, 1)
-            self.assertEqual(evaluator.calls, 1)
+            self.assertEqual(evaluator.calls, 0)
             rows = (out / "results.jsonl").read_text(encoding="utf-8").splitlines()
             self.assertEqual(len(rows), 1)
-            self.assertEqual(json.loads(rows[0])["execution"]["status"], "failed")
+            row = json.loads(rows[0])
+            self.assertEqual(row["execution"]["status"], "failed")
+            self.assertEqual(row["execution"]["available_outputs"], [])
+            self.assertEqual(
+                row["execution"]["failure"],
+                {"kind": "process", "code": "test_failure", "impact": "run"},
+            )
+            self.assertEqual(row["evaluation"]["status"], "skipped")
+            self.assertEqual(row["evaluation"]["metrics"], {})
+            self.assertEqual(row["evaluation"]["outcomes"], {})
             metadata = json.loads((out / "run-metadata.json").read_text(encoding="utf-8"))
             self.assertEqual(metadata["status"], "failed")
+            self.assertEqual(metadata["evaluation_status_counts"], {"skipped": 1})
+
+            interrupt_out = Path(tmp) / "interrupt-run"
+            interrupt_executor = FakeExecutor(fail_on_call=1, result_status=ExecutionStatus.INTERRUPTED)
+            with self.assertRaises(RunAbort) as interrupted:
+                run_benchmark(FakeBenchmark(), FakeEvaluator(), interrupt_executor, out_dir=interrupt_out, limit=3)
+            self.assertEqual(str(interrupted.exception), "interrupted")
+            interrupt_metadata = json.loads((interrupt_out / "run-metadata.json").read_text(encoding="utf-8"))
+            self.assertEqual(interrupt_metadata["status"], "interrupted")
 
     def test_reproducibility_metadata_is_typed_and_secret_safe(self) -> None:
         repository = RepositoryProvenance("a" * 40, "available", "clean")
