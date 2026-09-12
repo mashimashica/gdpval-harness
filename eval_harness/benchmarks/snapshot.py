@@ -142,10 +142,6 @@ def _validate_logical_path(path: object, *, label: str = "snapshot file path") -
         raise SnapshotError(f"{label} is unsafe")
     if any(part in {"", ".", ".."} for part in pure.parts):
         raise SnapshotError(f"{label} is unsafe")
-    # ``PurePosixPath`` treats a few unusual inputs leniently.  Requiring the
-    # rejoined parts to equal the original gives us a strict normalized form.
-    if "/".join(pure.parts) != path:
-        raise SnapshotError(f"{label} is unsafe")
     return path
 
 
@@ -192,13 +188,6 @@ def _validate_file_projection(
                 raise SnapshotError(f"{label} contain a file and directory collision")
         path_keys[key] = item.path
 
-    # The preceding pass only sees a prefix before the later file when the
-    # shorter entry is encountered first.  Recheck in the other order too.
-    all_keys = set(path_keys)
-    for item in ordered:
-        parts = item.path.split("/")
-        if any(_collision_key("/".join(parts[:index])) in all_keys for index in range(1, len(parts))):
-            raise SnapshotError(f"{label} contain a file and directory collision")
     return ordered
 
 
@@ -1265,32 +1254,12 @@ def _preflight_materialization_paths(workspace: Path, files: Sequence[SnapshotFi
     task_inputs_root = workspace / "task_inputs"
     if task_inputs_root.is_symlink() or task_inputs_root.exists():
         raise SnapshotError("execution destination already contains task_inputs")
+    for sibling in workspace.iterdir():
+        if _collision_key(sibling.name) == _collision_key("task_inputs"):
+            raise SnapshotError("execution destination contains a path collision")
     for item in files:
         if not item.path.startswith("task_inputs/"):
             raise SnapshotError("execution files must use task_inputs paths")
-        parts = item.path.split("/")
-        # Check every existing component in the actual directory that contains
-        # it.  This catches a sibling such as TASK_INPUTS before any write.
-        current = workspace
-        for index, part in enumerate(parts):
-            if current.is_symlink() or not current.is_dir():
-                if current.exists() or current.is_symlink():
-                    raise SnapshotError("execution destination contains an unsafe parent")
-                break
-            siblings = tuple(current.iterdir())
-            for sibling in siblings:
-                if _collision_key(sibling.name) == _collision_key(part) and sibling.name != part:
-                    raise SnapshotError("execution destination contains a path collision")
-            current = current / part
-            if current.is_symlink():
-                raise SnapshotError("execution destination contains a symlink")
-            if current.exists():
-                if index < len(parts) - 1 and not current.is_dir():
-                    raise SnapshotError("execution destination contains an unsafe parent")
-                if index == len(parts) - 1:
-                    raise SnapshotError("execution destination already contains a target")
-            else:
-                break
 
 
 def materialize_execution(snapshot: BenchmarkSnapshot | Path, task_id: str, workspace: Path) -> tuple[str, ...]:

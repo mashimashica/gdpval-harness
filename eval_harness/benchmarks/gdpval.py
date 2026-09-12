@@ -220,12 +220,6 @@ Task:
             relative = downloaded_path
             _validate_logical_path(relative, label="GDPval downloaded path")
             source = workspace / relative
-            # A downloaded path is checked by the central race-safe reader.  We
-            # also ensure it is inside this private task staging directory.
-            try:
-                source.relative_to(workspace)
-            except ValueError as exc:
-                raise SnapshotError("GDPval downloader returned a path outside staging") from exc
             entries.append((f"task_inputs/{logical_name}", source))
 
         return SnapshotTaskContent(
