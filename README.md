@@ -1,4 +1,4 @@
-# gdpval-harness
+# Eval Harness
 
 A reproducible harness for running GDPval with configurable agent executors, model providers, and judges.
 
