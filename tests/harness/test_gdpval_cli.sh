@@ -101,30 +101,30 @@ assert judge_unset["configuration_sha256"] != judge_maximum["configuration_sha25
 PY
 PYTHONPYCACHEPREFIX="$pycache" python3 -m py_compile \
   scripts/gdpval_run_metadata.py \
-  gdpval_harness/__init__.py \
-  gdpval_harness/cli.py \
-  gdpval_harness/reasoning.py \
-  gdpval_harness/layout.py \
-  gdpval_harness/local_runner.py \
-  gdpval_harness/local_judge_runner.py \
-  gdpval_harness/runner.py \
-  gdpval_harness/benchmarks/__init__.py \
-  gdpval_harness/benchmarks/base.py \
-  gdpval_harness/benchmarks/aime26.py \
-  gdpval_harness/benchmarks/bigcodebench.py \
-  gdpval_harness/benchmarks/gdpval.py \
-  gdpval_harness/benchmarks/registry.py \
-  gdpval_harness/executors/__init__.py \
-  gdpval_harness/executors/base.py \
-  gdpval_harness/executors/claude_code.py \
-  gdpval_harness/executors/codex.py \
-  gdpval_harness/executors/cursor.py \
-  gdpval_harness/executors/registry.py \
-  gdpval_harness/judges/__init__.py \
-  gdpval_harness/judges/base.py \
-  gdpval_harness/judges/codex.py \
-  gdpval_harness/judges/claude_code.py \
-  gdpval_harness/judges/pairwise.py
+  eval_harness/__init__.py \
+  eval_harness/cli.py \
+  eval_harness/reasoning.py \
+  eval_harness/layout.py \
+  eval_harness/local_runner.py \
+  eval_harness/local_judge_runner.py \
+  eval_harness/runner.py \
+  eval_harness/benchmarks/__init__.py \
+  eval_harness/benchmarks/base.py \
+  eval_harness/benchmarks/aime26.py \
+  eval_harness/benchmarks/bigcodebench.py \
+  eval_harness/benchmarks/gdpval.py \
+  eval_harness/benchmarks/registry.py \
+  eval_harness/executors/__init__.py \
+  eval_harness/executors/base.py \
+  eval_harness/executors/claude_code.py \
+  eval_harness/executors/codex.py \
+  eval_harness/executors/cursor.py \
+  eval_harness/executors/registry.py \
+  eval_harness/judges/__init__.py \
+  eval_harness/judges/base.py \
+  eval_harness/judges/codex.py \
+  eval_harness/judges/claude_code.py \
+  eval_harness/judges/pairwise.py
 python3 -m unittest discover -s tests/harness -p 'test_*.py'
 bash tests/harness/test_codex_executor.sh
 bash tests/harness/test_claude_code_executor.sh

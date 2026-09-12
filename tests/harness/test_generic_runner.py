@@ -13,9 +13,9 @@ from pathlib import Path
 from typing import TypedDict, cast
 from unittest.mock import patch
 
-import gdpval_harness.runner as runner_module
-from gdpval_harness.benchmarks.base import Benchmark, BenchmarkTask
-from gdpval_harness.evaluators.base import (
+import eval_harness.runner as runner_module
+from eval_harness.benchmarks.base import Benchmark, BenchmarkTask
+from eval_harness.evaluators.base import (
     EvaluationPlan,
     EvaluationRequest,
     EvaluationResult,
@@ -24,9 +24,9 @@ from gdpval_harness.evaluators.base import (
     EvaluatorPreflightResult,
     EvaluatorType,
 )
-from gdpval_harness.evaluators.gdpval import GDPvalExternalEvaluator
-from gdpval_harness.evaluators.pairwise import PairwiseJudgeEvaluator
-from gdpval_harness.executors.base import (
+from eval_harness.evaluators.gdpval import GDPvalExternalEvaluator
+from eval_harness.evaluators.pairwise import PairwiseJudgeEvaluator
+from eval_harness.executors.base import (
     ExecutionRequest,
     ExecutionResult,
     ExecutionStatus,
@@ -34,8 +34,8 @@ from gdpval_harness.executors.base import (
     PreflightResult,
     TaskSpec,
 )
-from gdpval_harness.interventions.agent_skill import AgentSkillIntervention, load_agent_skill_bundle
-from gdpval_harness.interventions.base import (
+from eval_harness.interventions.agent_skill import AgentSkillIntervention, load_agent_skill_bundle
+from eval_harness.interventions.base import (
     ApplicationMapping,
     Intervention,
     InterventionApplication,
@@ -46,11 +46,11 @@ from gdpval_harness.interventions.base import (
     InterventionType,
     compute_bundle_sha256,
 )
-from gdpval_harness.judges.base import JudgeExecutor, JudgePreflightResult, JudgeRequest, JudgeResult
-from gdpval_harness.judges.pairwise import discover_tasks
-from gdpval_harness.local_judge_runner import _candidate_task_prompt
-from gdpval_harness.provenance import RepositoryProvenance, canonical_json_sha256
-from gdpval_harness.runner import run_benchmark
+from eval_harness.judges.base import JudgeExecutor, JudgePreflightResult, JudgeRequest, JudgeResult
+from eval_harness.judges.pairwise import discover_tasks
+from eval_harness.local_judge_runner import _candidate_task_prompt
+from eval_harness.provenance import RepositoryProvenance, canonical_json_sha256
+from eval_harness.runner import run_benchmark
 
 
 class _ExecutorOptions(TypedDict, total=False):

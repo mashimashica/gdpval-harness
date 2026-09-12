@@ -14,7 +14,7 @@ real_python="$(command -v python3)"
 cat >"$fake_bin/python3" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
-if [[ "${1-}" == -m && "${2-}" == gdpval_harness.local_runner ]]; then
+if [[ "${1-}" == -m && "${2-}" == eval_harness.local_runner ]]; then
   printf '%s\n' "${GDPVAL_EXECUTOR:-}" "${GDPVAL_CONDITION:-}" "${GDPVAL_CONDITION_FILE:-}" "${LIMIT:-}" >"${FAKE_CONDITION_ENV_LOG:?}"
   exit 0
 fi

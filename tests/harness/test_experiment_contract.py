@@ -10,10 +10,10 @@ from dataclasses import fields as dataclass_fields
 from pathlib import Path
 from typing import TypedDict, cast
 
-import gdpval_harness.experiments as experiments
-import gdpval_harness.experiments.profile as profile_module
-import gdpval_harness.experiments.runner as runner_module
-from gdpval_harness.experiments import (
+import eval_harness.experiments as experiments
+import eval_harness.experiments.profile as profile_module
+import eval_harness.experiments.runner as runner_module
+from eval_harness.experiments import (
     ExperimentArm,
     ExperimentInputSpec,
     ExperimentProfile,

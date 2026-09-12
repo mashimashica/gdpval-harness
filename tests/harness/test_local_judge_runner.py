@@ -9,7 +9,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from gdpval_harness.local_judge_runner import _candidate_task_prompt, _judge_environment
+from eval_harness.local_judge_runner import _candidate_task_prompt, _judge_environment
 
 
 class LocalJudgeRunnerTests(unittest.TestCase):

@@ -8,7 +8,7 @@ import unittest
 from pathlib import Path
 from typing import Any
 
-from gdpval_harness.experiments.profile import load_experiment_profile
+from eval_harness.experiments.profile import load_experiment_profile
 
 
 _REPOSITORY_ROOT = Path(__file__).resolve().parents[2]

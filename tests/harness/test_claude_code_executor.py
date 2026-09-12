@@ -8,8 +8,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from gdpval_harness.executors.base import ExecutionRequest, TaskSpec
-from gdpval_harness.executors.claude_code import ClaudeCodeExecutor, subscription_environment
+from eval_harness.executors.base import ExecutionRequest, TaskSpec
+from eval_harness.executors.claude_code import ClaudeCodeExecutor, subscription_environment
 
 
 class ClaudeCodeExecutorTests(unittest.TestCase):

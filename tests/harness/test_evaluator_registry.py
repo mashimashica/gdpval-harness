@@ -5,8 +5,8 @@ from __future__ import annotations
 
 import unittest
 
-from gdpval_harness.evaluators.base import EvaluatorType
-from gdpval_harness.evaluators.registry import get_evaluator_descriptor
+from eval_harness.evaluators.base import EvaluatorType
+from eval_harness.evaluators.registry import get_evaluator_descriptor
 
 
 class EvaluatorRegistryTests(unittest.TestCase):

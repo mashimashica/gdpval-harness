@@ -9,8 +9,8 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from gdpval_harness.executors.base import ExecutionRequest, TaskSpec
-from gdpval_harness.executors.codex import CodexExecutor, subscription_environment
+from eval_harness.executors.base import ExecutionRequest, TaskSpec
+from eval_harness.executors.codex import CodexExecutor, subscription_environment
 
 
 class CodexExecutorTests(unittest.TestCase):
@@ -84,7 +84,7 @@ class CodexExecutorTests(unittest.TestCase):
                 output_path.write_bytes(b"final \\boxed{42} \xff\n")
                 return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
 
-            with patch("gdpval_harness.executors.codex.subprocess.run", side_effect=fake_run):
+            with patch("eval_harness.executors.codex.subprocess.run", side_effect=fake_run):
                 result = executor.execute(request)
 
             self.assertEqual(result.output_text, "final \\boxed{42} \ufffd\n")

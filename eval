@@ -5,4 +5,4 @@
 set -euo pipefail
 ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 cd "$ROOT"
-exec python3 -m gdpval_harness.cli "$@"
+exec python3 -m eval_harness.cli "$@"

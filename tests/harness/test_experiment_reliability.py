@@ -13,11 +13,11 @@ from dataclasses import replace
 from pathlib import Path
 from unittest.mock import patch
 
-import gdpval_harness.experiments.base as base_module
-import gdpval_harness.experiments.profile as profile_module
-import gdpval_harness.experiments.runner as runner_module
-from gdpval_harness.benchmarks.base import Benchmark, BenchmarkTask
-from gdpval_harness.builders.base import (
+import eval_harness.experiments.base as base_module
+import eval_harness.experiments.profile as profile_module
+import eval_harness.experiments.runner as runner_module
+from eval_harness.benchmarks.base import Benchmark, BenchmarkTask
+from eval_harness.builders.base import (
     Builder,
     BuilderInputBundle,
     BuilderPreflightResult,
@@ -25,9 +25,9 @@ from gdpval_harness.builders.base import (
     BuildResult,
     BuildStatus,
 )
-from gdpval_harness.builders.executor_skill import ExecutorSkillBuilder
-from gdpval_harness.builders.inputs import load_builder_input_bundle
-from gdpval_harness.evaluators.base import (
+from eval_harness.builders.executor_skill import ExecutorSkillBuilder
+from eval_harness.builders.inputs import load_builder_input_bundle
+from eval_harness.evaluators.base import (
     EvaluationPlan,
     EvaluationRequest,
     EvaluationResult,
@@ -36,7 +36,7 @@ from gdpval_harness.evaluators.base import (
     EvaluatorPreflightResult,
     EvaluatorType,
 )
-from gdpval_harness.executors.base import (
+from eval_harness.executors.base import (
     ExecutionRequest,
     ExecutionResult,
     ExecutionStatus,
@@ -44,7 +44,7 @@ from gdpval_harness.executors.base import (
     PreflightResult,
     TaskSpec,
 )
-from gdpval_harness.experiments.base import (
+from eval_harness.experiments.base import (
     ExperimentArm,
     ExperimentInputSpec,
     ExperimentProfile,
@@ -52,9 +52,9 @@ from gdpval_harness.experiments.base import (
     ExperimentRunSummary,
     LoadedExperimentProfile,
 )
-from gdpval_harness.interventions import load_agent_skill_bundle
-from gdpval_harness.provenance import RepositoryProvenance, canonical_json_sha256
-from gdpval_harness.runner import RunSummary
+from eval_harness.interventions import load_agent_skill_bundle
+from eval_harness.provenance import RepositoryProvenance, canonical_json_sha256
+from eval_harness.runner import RunSummary
 
 
 class ReliabilityBenchmark(Benchmark):
@@ -588,7 +588,7 @@ class ExperimentReliabilityTests(unittest.TestCase):
             repository = RepositoryProvenance("a" * 40, "available", "clean")
             with (
                 patch.object(runner_module.secrets, "token_hex", return_value="schedule-0000000000000001"),
-                patch("gdpval_harness.runner.secrets.token_urlsafe", return_value="application-run-1"),
+                patch("eval_harness.runner.secrets.token_urlsafe", return_value="application-run-1"),
                 patch.object(runner_module, "repository_provenance", return_value=repository),
             ):
                 summary = runner_module.run_builder_experiment(
@@ -669,7 +669,7 @@ class ExperimentReliabilityTests(unittest.TestCase):
             )
             with (
                 patch.object(runner_module.secrets, "token_hex", return_value="schedule-0000000000000002"),
-                patch("gdpval_harness.runner.secrets.token_urlsafe", return_value="application-run-failed"),
+                patch("eval_harness.runner.secrets.token_urlsafe", return_value="application-run-failed"),
             ):
                 summary = runner_module.run_builder_experiment(
                     profile,
@@ -731,7 +731,7 @@ class ExperimentReliabilityTests(unittest.TestCase):
             failing_application = ReliabilityApplicationExecutor(raise_on_execute=RuntimeError("application boundary"))
             with (
                 patch.object(runner_module.secrets, "token_hex", return_value="schedule-0000000000000004"),
-                patch("gdpval_harness.runner.secrets.token_urlsafe", return_value="application-run-error"),
+                patch("eval_harness.runner.secrets.token_urlsafe", return_value="application-run-error"),
             ):
                 with self.assertRaisesRegex(RuntimeError, "application boundary"):
                     runner_module.run_builder_experiment(

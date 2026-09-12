@@ -12,9 +12,9 @@ from dataclasses import replace
 from pathlib import Path
 from unittest.mock import patch
 
-import gdpval_harness.builders.artifact as artifact_module
-from gdpval_harness.builders.artifact import ArtifactHandoffError, GeneratedSkillValidationError
-from gdpval_harness.interventions import InterventionBundle, load_agent_skill_bundle
+import eval_harness.builders.artifact as artifact_module
+from eval_harness.builders.artifact import ArtifactHandoffError, GeneratedSkillValidationError
+from eval_harness.interventions import InterventionBundle, load_agent_skill_bundle
 
 
 class GeneratedSkillArtifactTests(unittest.TestCase):
@@ -280,7 +280,7 @@ class GeneratedSkillArtifactTests(unittest.TestCase):
                     return InterventionBundle(bundle.root, manifest)
                 return bundle
 
-            with patch("gdpval_harness.builders.artifact.load_agent_skill_bundle", side_effect=mismatching_loader):
+            with patch("eval_harness.builders.artifact.load_agent_skill_bundle", side_effect=mismatching_loader):
                 with self.assertRaises(ArtifactHandoffError):
                     artifact_module.seal_generated_skill(deliverables, artifact_root)
             self.assertEqual(calls, 2)

@@ -14,18 +14,18 @@ from pathlib import Path
 from typing import Mapping, TypeAlias
 from unittest.mock import patch
 
-import gdpval_harness.executors.claude_code as claude_executor_module
-import gdpval_harness.executors.codex as codex_executor_module
-import gdpval_harness.executors.cursor as cursor_executor_module
-import gdpval_harness.judges.claude_code as claude_judge_module
-import gdpval_harness.judges.codex as codex_judge_module
-from gdpval_harness.executors.base import ExecutionRequest, ExecutionStatus, TaskSpec
-from gdpval_harness.executors.claude_code import ClaudeCodeExecutor
-from gdpval_harness.executors.codex import CodexExecutor
-from gdpval_harness.executors.cursor import CursorExecutor
-from gdpval_harness.judges.base import JudgeRequest, Verdict
-from gdpval_harness.judges.claude_code import ClaudeCodeJudgeExecutor
-from gdpval_harness.judges.codex import (
+import eval_harness.executors.claude_code as claude_executor_module
+import eval_harness.executors.codex as codex_executor_module
+import eval_harness.executors.cursor as cursor_executor_module
+import eval_harness.judges.claude_code as claude_judge_module
+import eval_harness.judges.codex as codex_judge_module
+from eval_harness.executors.base import ExecutionRequest, ExecutionStatus, TaskSpec
+from eval_harness.executors.claude_code import ClaudeCodeExecutor
+from eval_harness.executors.codex import CodexExecutor
+from eval_harness.executors.cursor import CursorExecutor
+from eval_harness.judges.base import JudgeRequest, Verdict
+from eval_harness.judges.claude_code import ClaudeCodeJudgeExecutor
+from eval_harness.judges.codex import (
     CodexJudgeExecutor,
     _normalize_utf8_log,
     _paths_overlap,
@@ -33,7 +33,7 @@ from gdpval_harness.judges.codex import (
     _resolved_command_read_paths,
     _resolved_path,
 )
-from gdpval_harness.judges.pairwise import (
+from eval_harness.judges.pairwise import (
     _assert_directory,
     _copy_tree,
     aggregate,

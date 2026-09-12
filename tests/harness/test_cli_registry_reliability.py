@@ -15,16 +15,16 @@ from types import SimpleNamespace
 from typing import Mapping, cast
 from unittest.mock import Mock, patch
 
-import gdpval_harness.benchmarks.registry as benchmark_registry
-import gdpval_harness.cli as cli
-import gdpval_harness.evaluators.registry as evaluator_registry
-import gdpval_harness.executors.registry as executor_registry
-import gdpval_harness.interventions.registry as intervention_registry
-from gdpval_harness.benchmarks.aime26 import AIME26Benchmark
-from gdpval_harness.benchmarks.bigcodebench import BigCodeBenchBenchmark
-from gdpval_harness.benchmarks.gdpval import GDPvalBenchmark
-from gdpval_harness.benchmarks.registry import create_benchmark, get_benchmark_descriptor, list_benchmarks
-from gdpval_harness.evaluators.base import (
+import eval_harness.benchmarks.registry as benchmark_registry
+import eval_harness.cli as cli
+import eval_harness.evaluators.registry as evaluator_registry
+import eval_harness.executors.registry as executor_registry
+import eval_harness.interventions.registry as intervention_registry
+from eval_harness.benchmarks.aime26 import AIME26Benchmark
+from eval_harness.benchmarks.bigcodebench import BigCodeBenchBenchmark
+from eval_harness.benchmarks.gdpval import GDPvalBenchmark
+from eval_harness.benchmarks.registry import create_benchmark, get_benchmark_descriptor, list_benchmarks
+from eval_harness.evaluators.base import (
     EvaluationCandidate,
     EvaluationPlan,
     EvaluationRequest,
@@ -32,8 +32,8 @@ from gdpval_harness.evaluators.base import (
     EvaluatorType,
     require_two_candidates,
 )
-from gdpval_harness.evaluators.exact import ExactMatchEvaluator
-from gdpval_harness.evaluators.registry import (
+from eval_harness.evaluators.exact import ExactMatchEvaluator
+from eval_harness.evaluators.registry import (
     EvaluatorDescriptor,
     create_evaluator,
     create_pairwise_evaluator,
@@ -41,11 +41,11 @@ from gdpval_harness.evaluators.registry import (
     list_evaluator_descriptors,
     list_evaluators,
 )
-from gdpval_harness.executors.base import ExecutionResult, ExecutionStatus, TaskSpec
-from gdpval_harness.executors.registry import create_executor, get_executor_descriptor, list_executors
-from gdpval_harness.interventions import NoneIntervention, get_intervention
-from gdpval_harness.interventions.registry import create_intervention
-from gdpval_harness.judges.base import JudgeExecutor, JudgePreflightResult, JudgeRequest, JudgeResult
+from eval_harness.executors.base import ExecutionResult, ExecutionStatus, TaskSpec
+from eval_harness.executors.registry import create_executor, get_executor_descriptor, list_executors
+from eval_harness.interventions import NoneIntervention, get_intervention
+from eval_harness.interventions.registry import create_intervention
+from eval_harness.judges.base import JudgeExecutor, JudgePreflightResult, JudgeRequest, JudgeResult
 
 
 class RegistryJudge(JudgeExecutor):

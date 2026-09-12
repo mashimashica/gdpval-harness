@@ -8,8 +8,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from gdpval_harness.judges.base import Verdict
-from gdpval_harness.judges.pairwise import (
+from eval_harness.judges.base import Verdict
+from eval_harness.judges.pairwise import (
     aggregate,
     matched_tasks,
     normalize_verdict,

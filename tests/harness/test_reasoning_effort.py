@@ -11,11 +11,11 @@ from pathlib import Path
 from typing import TypedDict, cast
 from unittest.mock import patch
 
-from gdpval_harness.benchmarks.base import Benchmark, BenchmarkTask
-from gdpval_harness.builders.base import BuilderInputBundle
-from gdpval_harness.builders.executor_skill import ExecutorSkillBuilder
-from gdpval_harness.builders.inputs import load_builder_input_bundle
-from gdpval_harness.evaluators.base import (
+from eval_harness.benchmarks.base import Benchmark, BenchmarkTask
+from eval_harness.builders.base import BuilderInputBundle
+from eval_harness.builders.executor_skill import ExecutorSkillBuilder
+from eval_harness.builders.inputs import load_builder_input_bundle
+from eval_harness.evaluators.base import (
     EvaluationPlan,
     EvaluationRequest,
     EvaluationResult,
@@ -24,7 +24,7 @@ from gdpval_harness.evaluators.base import (
     EvaluatorPreflightResult,
     EvaluatorType,
 )
-from gdpval_harness.executors.base import (
+from eval_harness.executors.base import (
     ExecutionRequest,
     ExecutionResult,
     ExecutionStatus,
@@ -32,26 +32,26 @@ from gdpval_harness.executors.base import (
     PreflightResult,
     TaskSpec,
 )
-from gdpval_harness.executors.codex import CodexExecutor
-from gdpval_harness.executors.registry import create_executor
-from gdpval_harness.experiments.base import (
+from eval_harness.executors.codex import CodexExecutor
+from eval_harness.executors.registry import create_executor
+from eval_harness.experiments.base import (
     ExperimentArm,
     ExperimentInputSpec,
     ExperimentProfile,
     ExperimentRunConfig,
     LoadedExperimentProfile,
 )
-from gdpval_harness.experiments.runner import run_builder_experiment
-from gdpval_harness.judges.base import JudgeRequest
-from gdpval_harness.judges.codex import CodexJudgeExecutor
-from gdpval_harness.local_runner import _validate_resume_condition
-from gdpval_harness.provenance import canonical_json_sha256
-from gdpval_harness.reasoning import (
+from eval_harness.experiments.runner import run_builder_experiment
+from eval_harness.judges.base import JudgeRequest
+from eval_harness.judges.codex import CodexJudgeExecutor
+from eval_harness.local_runner import _validate_resume_condition
+from eval_harness.provenance import canonical_json_sha256
+from eval_harness.reasoning import (
     REASONING_EFFORT_VALUES,
     ReasoningEffortOption,
     validate_reasoning_effort,
 )
-from gdpval_harness.runner import RunSummary, run_benchmark
+from eval_harness.runner import RunSummary, run_benchmark
 
 
 class _ExperimentRunConfigValues(TypedDict):
@@ -448,7 +448,7 @@ class ReasoningEffortContractTests(unittest.TestCase):
                         "codex", True, version="old-codex-1", auth_mode="chatgpt-subscription"
                     ),
                 ),
-                patch("gdpval_harness.executors.codex.subprocess.run", side_effect=fake_run),
+                patch("eval_harness.executors.codex.subprocess.run", side_effect=fake_run),
             ):
                 summary = run_benchmark(
                     _FakeBenchmark(task_count=2),
@@ -494,15 +494,15 @@ class ReasoningEffortContractTests(unittest.TestCase):
             )
             with (
                 patch(
-                    "gdpval_harness.experiments.runner.load_experiment_inputs",
+                    "eval_harness.experiments.runner.load_experiment_inputs",
                     return_value={"input-guide": source_roots},
                 ),
                 patch(
-                    "gdpval_harness.experiments.runner.secrets.token_hex",
+                    "eval_harness.experiments.runner.secrets.token_hex",
                     side_effect=[f"{index:032x}" for index in range(1, 20)],
                 ),
                 patch(
-                    "gdpval_harness.runner.secrets.token_urlsafe",
+                    "eval_harness.runner.secrets.token_urlsafe",
                     side_effect=[f"application-run-{index}" for index in range(1, 20)],
                 ),
                 patch.object(
@@ -512,7 +512,7 @@ class ReasoningEffortContractTests(unittest.TestCase):
                         "codex", True, version="old-codex-1", auth_mode="chatgpt-subscription"
                     ),
                 ),
-                patch("gdpval_harness.executors.codex.subprocess.run", side_effect=fake_run),
+                patch("eval_harness.executors.codex.subprocess.run", side_effect=fake_run),
             ):
                 summary = run_builder_experiment(
                     profile,
@@ -637,15 +637,15 @@ class ReasoningEffortContractTests(unittest.TestCase):
         application = _FakeExecutor(application_reasoning_effort)
         with (
             patch(
-                "gdpval_harness.experiments.runner.load_experiment_inputs",
+                "eval_harness.experiments.runner.load_experiment_inputs",
                 return_value={"input-guide": source_bundle},
             ),
             patch(
-                "gdpval_harness.experiments.runner.secrets.token_hex",
+                "eval_harness.experiments.runner.secrets.token_hex",
                 side_effect=[f"{index:032x}" for index in range(1, 20)],
             ),
             patch(
-                "gdpval_harness.runner.secrets.token_urlsafe",
+                "eval_harness.runner.secrets.token_urlsafe",
                 side_effect=[f"application-run-{index}" for index in range(1, 20)],
             ),
         ):

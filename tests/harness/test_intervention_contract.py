@@ -9,8 +9,8 @@ import unittest
 from dataclasses import FrozenInstanceError
 from pathlib import Path
 
-from gdpval_harness.executors.base import TaskSpec
-from gdpval_harness.interventions import (
+from eval_harness.executors.base import TaskSpec
+from eval_harness.interventions import (
     ApplicationMapping,
     FilesIntervention,
     InterventionFile,

@@ -9,8 +9,8 @@ from dataclasses import FrozenInstanceError
 from pathlib import Path
 from typing import cast
 
-from gdpval_harness.evaluators.aime26 import AIME26Evaluator
-from gdpval_harness.evaluators.base import (
+from eval_harness.evaluators.aime26 import AIME26Evaluator
+from eval_harness.evaluators.base import (
     EvaluationCandidate,
     EvaluationPlan,
     EvaluationRequest,
@@ -20,9 +20,9 @@ from gdpval_harness.evaluators.base import (
     require_one_candidate,
     require_two_candidates,
 )
-from gdpval_harness.evaluators.bigcodebench import BigCodeBenchEvaluator
-from gdpval_harness.evaluators.exact import ExactMatchEvaluator
-from gdpval_harness.executors.base import ExecutionResult, ExecutionStatus
+from eval_harness.evaluators.bigcodebench import BigCodeBenchEvaluator
+from eval_harness.evaluators.exact import ExactMatchEvaluator
+from eval_harness.executors.base import ExecutionResult, ExecutionStatus
 
 
 def _result(root: Path, task_id: str = "task") -> ExecutionResult:

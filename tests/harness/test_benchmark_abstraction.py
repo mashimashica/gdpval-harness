@@ -8,11 +8,11 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from gdpval_harness.benchmarks.base import Benchmark, BenchmarkTask
-from gdpval_harness.benchmarks.gdpval import GDPvalBenchmark
-from gdpval_harness.benchmarks.registry import get_benchmark_descriptor
-from gdpval_harness.evaluators.base import EvaluatorType
-from gdpval_harness.executors.base import TaskSpec
+from eval_harness.benchmarks.base import Benchmark, BenchmarkTask
+from eval_harness.benchmarks.gdpval import GDPvalBenchmark
+from eval_harness.benchmarks.registry import get_benchmark_descriptor
+from eval_harness.evaluators.base import EvaluatorType
+from eval_harness.executors.base import TaskSpec
 
 
 class BenchmarkAbstractionTests(unittest.TestCase):

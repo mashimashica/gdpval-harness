@@ -10,10 +10,10 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from gdpval_harness.benchmarks.bigcodebench import BigCodeBenchBenchmark
-from gdpval_harness.evaluators.base import EvaluationCandidate, EvaluationRequest, EvaluatorType
-from gdpval_harness.evaluators.bigcodebench import BigCodeBenchEvaluator, _native_bigcodebench_evaluate
-from gdpval_harness.executors.base import ExecutionResult, ExecutionStatus
+from eval_harness.benchmarks.bigcodebench import BigCodeBenchBenchmark
+from eval_harness.evaluators.base import EvaluationCandidate, EvaluationRequest, EvaluatorType
+from eval_harness.evaluators.bigcodebench import BigCodeBenchEvaluator, _native_bigcodebench_evaluate
+from eval_harness.executors.base import ExecutionResult, ExecutionStatus
 
 
 class BigCodeBenchBenchmarkTests(unittest.TestCase):
@@ -106,7 +106,7 @@ class BigCodeBenchBenchmarkTests(unittest.TestCase):
             result = self.result(root, output_text="```python\nreturn 42\n```")
 
             with patch(
-                "gdpval_harness.evaluators.bigcodebench._native_bigcodebench_evaluate",
+                "eval_harness.evaluators.bigcodebench._native_bigcodebench_evaluate",
                 return_value={
                     "reward": 1.0,
                     "status": "pass",
@@ -149,7 +149,7 @@ class BigCodeBenchBenchmarkTests(unittest.TestCase):
             evaluator._bcb_python = grader / ".bcb_venv" / "bin" / "python"
             result = self.result(root, output_text="```python\nreturn 42\n```", status=ExecutionStatus.FAILED)
 
-            with patch("gdpval_harness.evaluators.bigcodebench._native_bigcodebench_evaluate") as native:
+            with patch("eval_harness.evaluators.bigcodebench._native_bigcodebench_evaluate") as native:
                 evaluation = evaluator.evaluate(self.request(root, result))
 
             native.assert_not_called()
@@ -220,7 +220,7 @@ class BigCodeBenchBenchmarkTests(unittest.TestCase):
                     "resources_servers.bigcodebench.setup_bcb_venv.ensure_bcb_venv",
                     return_value=venv_python,
                 ) as ensure_venv,
-                patch("gdpval_harness.evaluators.bigcodebench.subprocess.run", side_effect=fake_run),
+                patch("eval_harness.evaluators.bigcodebench.subprocess.run", side_effect=fake_run),
             ):
                 evaluation = _native_bigcodebench_evaluate(
                     "```python\nreturn 42\n```",

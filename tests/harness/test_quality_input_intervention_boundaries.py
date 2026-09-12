@@ -26,15 +26,15 @@ from pathlib import Path
 from typing import Mapping, Sequence, cast
 from unittest.mock import patch
 
-import gdpval_harness.builders.inputs as inputs_module
-import gdpval_harness.experiments.profile as profile_module
-import gdpval_harness.experiments.runner as runner_module
-import gdpval_harness.interventions.agent_skill as skill_module
-import gdpval_harness.interventions.base as intervention_base
-import gdpval_harness.interventions.files as files_module
-import gdpval_harness.interventions.prompt_overlay as overlay_module
-from gdpval_harness.benchmarks.base import Benchmark, BenchmarkTask
-from gdpval_harness.builders.base import (
+import eval_harness.builders.inputs as inputs_module
+import eval_harness.experiments.profile as profile_module
+import eval_harness.experiments.runner as runner_module
+import eval_harness.interventions.agent_skill as skill_module
+import eval_harness.interventions.base as intervention_base
+import eval_harness.interventions.files as files_module
+import eval_harness.interventions.prompt_overlay as overlay_module
+from eval_harness.benchmarks.base import Benchmark, BenchmarkTask
+from eval_harness.builders.base import (
     Builder,
     BuilderInputBundle,
     BuilderInputManifest,
@@ -44,7 +44,7 @@ from gdpval_harness.builders.base import (
     BuildResult,
     BuildStatus,
 )
-from gdpval_harness.evaluators.base import (
+from eval_harness.evaluators.base import (
     EvaluationPlan,
     EvaluationRequest,
     EvaluationResult,
@@ -53,7 +53,7 @@ from gdpval_harness.evaluators.base import (
     EvaluatorPreflightResult,
     EvaluatorType,
 )
-from gdpval_harness.executors.base import (
+from eval_harness.executors.base import (
     ExecutionRequest,
     ExecutionResult,
     ExecutionStatus,
@@ -61,14 +61,14 @@ from gdpval_harness.executors.base import (
     PreflightResult,
     TaskSpec,
 )
-from gdpval_harness.experiments.base import (
+from eval_harness.experiments.base import (
     ExperimentArm,
     ExperimentInputSpec,
     ExperimentProfile,
     ExperimentRunConfig,
     LoadedExperimentProfile,
 )
-from gdpval_harness.interventions.base import (
+from eval_harness.interventions.base import (
     ApplicationMapping,
     InterventionApplication,
     InterventionBundle,
@@ -78,8 +78,8 @@ from gdpval_harness.interventions.base import (
     compute_bundle_sha256,
     file_evidence,
 )
-from gdpval_harness.provenance import canonical_json_sha256
-from gdpval_harness.runner import RunSummary
+from eval_harness.provenance import canonical_json_sha256
+from eval_harness.runner import RunSummary
 
 
 def _file(path: str = "input.txt", content: bytes = b"input") -> InterventionFile:

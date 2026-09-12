@@ -11,24 +11,24 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-import gdpval_harness.local_runner as local_runner
-from gdpval_harness.benchmarks.base import BenchmarkTask
-from gdpval_harness.executors.base import (
+import eval_harness.local_runner as local_runner
+from eval_harness.benchmarks.base import BenchmarkTask
+from eval_harness.executors.base import (
     ExecutionRequest,
     ExecutionResult,
     ExecutionStatus,
     PreflightResult,
     TaskSpec,
 )
-from gdpval_harness.executors.claude_code import ClaudeCodeExecutor
-from gdpval_harness.executors.codex import CodexExecutor
-from gdpval_harness.executors.cursor import CursorExecutor
-from gdpval_harness.interventions import PromptOverlayIntervention
-from gdpval_harness.interventions.base import InterventionPreflightResult
-from gdpval_harness.judges.base import JudgeRequest
-from gdpval_harness.judges.codex import CodexJudgeExecutor
-from gdpval_harness.local_judge_runner import _candidate_task_prompt
-from gdpval_harness.local_runner import (
+from eval_harness.executors.claude_code import ClaudeCodeExecutor
+from eval_harness.executors.codex import CodexExecutor
+from eval_harness.executors.cursor import CursorExecutor
+from eval_harness.interventions import PromptOverlayIntervention
+from eval_harness.interventions.base import InterventionPreflightResult
+from eval_harness.judges.base import JudgeRequest
+from eval_harness.judges.codex import CodexJudgeExecutor
+from eval_harness.local_judge_runner import _candidate_task_prompt
+from eval_harness.local_runner import (
     _application_evidence,
     _condition_instructions,
     _executor_environment,
