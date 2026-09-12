@@ -12,6 +12,7 @@ from typing import TypedDict, cast
 from eval_harness.evaluators.base import EvaluationCandidate, EvaluationRequest, EvaluationStatus
 from eval_harness.evaluators.pairwise import PairwiseJudgeEvaluator
 from eval_harness.executors.base import ExecutionResult, ExecutionStatus
+from eval_harness.failures import Failure, FailureImpact, FailureKind
 from eval_harness.judges.base import JudgeExecutor, JudgePreflightResult, JudgeRequest, JudgeResult, Verdict
 
 
@@ -72,6 +73,8 @@ def _execution(root: Path, label: str) -> ExecutionResult:
         started_at="s",
         finished_at="f",
         exit_code=0,
+        available_outputs=frozenset(),
+        failure=None,
     )
 
 
@@ -176,6 +179,8 @@ class PairwiseEvaluatorTests(unittest.TestCase):
                 started_at=failed.started_at,
                 finished_at=failed.finished_at,
                 exit_code=1,
+                available_outputs=frozenset(),
+                failure=Failure(FailureKind.PROCESS, "test_failure", FailureImpact.RUN),
             )
             second = EvaluationCandidate("b", failed, second.artifacts_dir)
             judge = FakeJudge()

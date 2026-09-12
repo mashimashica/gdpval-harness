@@ -15,6 +15,7 @@ from eval_harness.benchmarks.base import Benchmark, BenchmarkTask
 from eval_harness.builders.base import BuilderInputBundle
 from eval_harness.builders.executor_skill import ExecutorSkillBuilder
 from eval_harness.builders.inputs import load_builder_input_bundle
+from eval_harness.capabilities import ExecutorOutput
 from eval_harness.evaluators.base import (
     EvaluationPlan,
     EvaluationRequest,
@@ -167,6 +168,8 @@ class _FakeExecutor(Executor):
             started_at="started",
             finished_at="finished",
             exit_code=0,
+            available_outputs=frozenset({ExecutorOutput.FINAL_TEXT}),
+            failure=None,
             output_text="answer",
             reasoning_effort_requested=self.reasoning_effort,
         )

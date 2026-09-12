@@ -18,6 +18,7 @@ from eval_harness.benchmarks.base import Benchmark, BenchmarkTask
 from eval_harness.benchmarks.bigcodebench import BigCodeBenchBenchmark
 from eval_harness.benchmarks.gdpval import GDPvalBenchmark
 from eval_harness.benchmarks.registry import create_benchmark, get_benchmark_descriptor, list_benchmarks
+from eval_harness.capabilities import ExecutorOutput
 from eval_harness.evaluators.aime26 import AIME26Evaluator, _math_verify_preflight, _native_math_evaluate
 from eval_harness.evaluators.base import (
     EvaluationCandidate,
@@ -33,6 +34,7 @@ from eval_harness.evaluators.exact import ExactMatchEvaluator
 from eval_harness.evaluators.gdpval import GDPvalExternalEvaluator
 from eval_harness.evaluators.pairwise import PairwiseJudgeEvaluator, sanitize_environment
 from eval_harness.executors.base import ExecutionResult, ExecutionStatus, TaskSpec
+from eval_harness.failures import Failure, FailureImpact, FailureKind
 from eval_harness.interventions.agent_skill import AgentSkillIntervention, load_agent_skill_bundle
 from eval_harness.interventions.base import (
     ApplicationMapping,
@@ -79,6 +81,7 @@ def _execution_result(
     deliverables: Path | None = None,
 ) -> ExecutionResult:
     workspace = root / "workspace"
+    effective_output = output_text if status in {ExecutionStatus.COMPLETED, ExecutionStatus.NO_DELIVERABLE} else None
     return ExecutionResult(
         task_id=task_id,
         executor="fake",
@@ -91,7 +94,11 @@ def _execution_result(
         started_at="2026-09-12T00:00:00+00:00",
         finished_at="2026-09-12T00:00:01+00:00",
         exit_code=0 if status in {ExecutionStatus.COMPLETED, ExecutionStatus.NO_DELIVERABLE} else 1,
-        output_text=output_text,
+        available_outputs=frozenset({ExecutorOutput.FINAL_TEXT}) if effective_output is not None else frozenset(),
+        failure=None
+        if effective_output is not None
+        else Failure(FailureKind.PROCESS, "test_failure", FailureImpact.RUN),
+        output_text=effective_output,
     )
 
 
@@ -737,6 +744,8 @@ class EvaluatorBoundaryTests(unittest.TestCase):
                 started_at=overlapping_result.started_at,
                 finished_at=overlapping_result.finished_at,
                 exit_code=0,
+                available_outputs=frozenset({ExecutorOutput.FINAL_TEXT}),
+                failure=None,
                 output_text="code",
             )
             with self.assertRaisesRegex(RuntimeError, "separate"):

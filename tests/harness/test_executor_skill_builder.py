@@ -14,6 +14,7 @@ from eval_harness.builders import BuildFailurePhase, BuildRequest, BuildStatus
 from eval_harness.builders.artifact import ArtifactHandoffError
 from eval_harness.builders.executor_skill import ExecutorSkillBuilder
 from eval_harness.builders.inputs import load_builder_input_bundle
+from eval_harness.capabilities import ExecutorOutput
 from eval_harness.executors.base import (
     ExecutionRequest,
     ExecutionResult,
@@ -22,6 +23,7 @@ from eval_harness.executors.base import (
     PreflightResult,
     TaskSpec,
 )
+from eval_harness.failures import Failure, FailureImpact, FailureKind
 from eval_harness.interventions import AgentSkillIntervention
 
 
@@ -99,6 +101,8 @@ class DeterministicExecutor(Executor):
                 (skill / "references" / "guide.md").write_text("guide", encoding="utf-8")
         if self.raise_error:
             raise RuntimeError("deterministic executor failure")
+        successful = self.status in {ExecutionStatus.COMPLETED, ExecutionStatus.NO_DELIVERABLE}
+        output_text = "BUILDER-OUTPUT-SENTINEL" if successful else None
         return ExecutionResult(
             task_id=self.result_task_id or request.task.task_id,
             executor=self.result_executor or self.name,
@@ -110,8 +114,10 @@ class DeterministicExecutor(Executor):
             status=self.status,
             started_at="2026-01-01T00:00:00Z",
             finished_at="2026-01-01T00:00:01Z",
-            exit_code=0,
-            output_text="BUILDER-OUTPUT-SENTINEL",
+            exit_code=0 if successful else 1,
+            available_outputs=frozenset({ExecutorOutput.FINAL_TEXT}) if output_text is not None else frozenset(),
+            failure=None if successful else Failure(FailureKind.PROCESS, "test_failure", FailureImpact.RUN),
+            output_text=output_text,
             metadata={"builder_transcript": "BUILDER-METADATA-SENTINEL"},
         )
 
@@ -144,6 +150,8 @@ class ApplicationExecutor(Executor):
             started_at="2026-01-01T00:00:00Z",
             finished_at="2026-01-01T00:00:01Z",
             exit_code=0,
+            available_outputs=frozenset({ExecutorOutput.FINAL_TEXT}),
+            failure=None,
             output_text="APPLICATION-OUTPUT-SENTINEL",
             metadata={"application_metadata": "APPLICATION-METADATA-SENTINEL"},
         )

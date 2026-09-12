@@ -195,7 +195,17 @@ def execution_record(result: ExecutionResult) -> dict[str, object]:
         "started_at": result.started_at,
         "finished_at": result.finished_at,
         "exit_code": result.exit_code,
-        "output_text_present": bool(result.output_text),
+        "output_text_present": result.output_text is not None,
+        "available_outputs": sorted(output.value for output in result.available_outputs),
+        "failure": (
+            None
+            if result.failure is None
+            else {
+                "kind": result.failure.kind.value,
+                "code": result.failure.code,
+                "impact": result.failure.impact.value,
+            }
+        ),
         "metadata": {},
     }
     if result.reasoning_effort_requested is not None:

@@ -35,6 +35,7 @@ from eval_harness.benchmarks.aime26 import AIME26Benchmark
 from eval_harness.benchmarks.base import BenchmarkTask
 from eval_harness.benchmarks.bigcodebench import BigCodeBenchBenchmark
 from eval_harness.benchmarks.gdpval import GDPvalBenchmark
+from eval_harness.capabilities import ExecutorOutput
 from eval_harness.evaluators.aime26 import AIME26Evaluator
 from eval_harness.evaluators.base import (
     EvaluationCandidate,
@@ -47,6 +48,7 @@ from eval_harness.evaluators.exact import ExactMatchEvaluator
 from eval_harness.evaluators.gdpval import GDPvalExternalEvaluator
 from eval_harness.evaluators.pairwise import PairwiseJudgeEvaluator
 from eval_harness.executors.base import ExecutionResult, ExecutionStatus, TaskSpec
+from eval_harness.failures import Failure, FailureImpact, FailureKind
 from eval_harness.judges.base import JudgeExecutor, JudgePreflightResult, JudgeRequest, JudgeResult, Verdict
 
 
@@ -62,6 +64,7 @@ def _execution(
     execution_workspace = workspace or root / "workspace"
     execution_deliverables = deliverables or execution_workspace / "deliverables"
     execution_deliverables.mkdir(parents=True, exist_ok=True)
+    effective_output = output_text if status in {ExecutionStatus.COMPLETED, ExecutionStatus.NO_DELIVERABLE} else None
     return ExecutionResult(
         task_id=task_id,
         executor="fake",
@@ -74,7 +77,11 @@ def _execution(
         started_at="2026-09-12T00:00:00+00:00",
         finished_at="2026-09-12T00:00:01+00:00",
         exit_code=0 if status in {ExecutionStatus.COMPLETED, ExecutionStatus.NO_DELIVERABLE} else 1,
-        output_text=output_text,
+        available_outputs=frozenset({ExecutorOutput.FINAL_TEXT}) if effective_output is not None else frozenset(),
+        failure=None
+        if effective_output is not None
+        else Failure(FailureKind.PROCESS, "test_failure", FailureImpact.RUN),
+        output_text=effective_output,
     )
 
 

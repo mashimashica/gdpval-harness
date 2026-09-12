@@ -20,6 +20,7 @@ from eval_harness.builders.base import (
     BuildStatus,
 )
 from eval_harness.builders.inputs import load_builder_input_bundle
+from eval_harness.capabilities import ExecutorOutput
 from eval_harness.evaluators.base import (
     EvaluationPlan,
     EvaluationRequest,
@@ -46,6 +47,7 @@ from eval_harness.experiments.base import (
     LoadedExperimentProfile,
 )
 from eval_harness.experiments.runner import _make_schedule, _validate_build_result, run_builder_experiment
+from eval_harness.failures import Failure, FailureImpact, FailureKind
 from eval_harness.interventions.agent_skill import load_agent_skill_bundle
 from eval_harness.interventions.base import InterventionBundle
 from eval_harness.provenance import canonical_json_sha256
@@ -148,6 +150,7 @@ class _ApplicationExecutor(Executor):
         request.executor_dir.mkdir(parents=True, exist_ok=True)
         request.deliverables_dir.mkdir(parents=True, exist_ok=True)
         failed = self.fail_on_call == len(self.requests)
+        effective_output = None if failed else "private output sentinel"
         return ExecutionResult(
             task_id=request.task.task_id,
             executor=self.name,
@@ -160,7 +163,11 @@ class _ApplicationExecutor(Executor):
             started_at="2026-09-11T00:00:00+00:00",
             finished_at="2026-09-11T00:00:01+00:00",
             exit_code=1 if failed else 0,
-            output_text="private output sentinel",
+            available_outputs=(
+                frozenset({ExecutorOutput.FINAL_TEXT}) if effective_output is not None else frozenset()
+            ),
+            failure=None if not failed else Failure(FailureKind.PROCESS, "test_failure", FailureImpact.RUN),
+            output_text=effective_output,
             metadata={"private": "executor metadata sentinel"},
         )
 
@@ -225,6 +232,8 @@ class _Builder(Builder):
             started_at="2026-09-11T00:00:00+00:00",
             finished_at="2026-09-11T00:00:01+00:00",
             exit_code=0,
+            available_outputs=frozenset({ExecutorOutput.FINAL_TEXT}),
+            failure=None,
             output_text="private builder output sentinel",
             metadata={"private": "builder metadata sentinel"},
         )

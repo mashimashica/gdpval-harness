@@ -24,6 +24,7 @@ from eval_harness.benchmarks.aime26 import AIME26Benchmark
 from eval_harness.benchmarks.bigcodebench import BigCodeBenchBenchmark
 from eval_harness.benchmarks.gdpval import GDPvalBenchmark
 from eval_harness.benchmarks.registry import create_benchmark, get_benchmark_descriptor, list_benchmarks
+from eval_harness.capabilities import ExecutorOutput
 from eval_harness.evaluators.base import (
     EvaluationCandidate,
     EvaluationPlan,
@@ -43,6 +44,7 @@ from eval_harness.evaluators.registry import (
 )
 from eval_harness.executors.base import ExecutionResult, ExecutionStatus, TaskSpec
 from eval_harness.executors.registry import create_executor, get_executor_descriptor, list_executors
+from eval_harness.failures import Failure, FailureImpact, FailureKind
 from eval_harness.interventions import NoneIntervention, get_intervention
 from eval_harness.interventions.registry import create_intervention
 from eval_harness.judges.base import JudgeExecutor, JudgePreflightResult, JudgeRequest, JudgeResult
@@ -63,6 +65,8 @@ class RegistryJudge(JudgeExecutor):
 
 def execution_result(root: Path, *, status: ExecutionStatus = ExecutionStatus.COMPLETED) -> ExecutionResult:
     workspace = root / "workspace"
+    successful = status in {ExecutionStatus.COMPLETED, ExecutionStatus.NO_DELIVERABLE}
+    output_text = "answer" if successful else None
     return ExecutionResult(
         task_id="task",
         executor="fake",
@@ -74,8 +78,10 @@ def execution_result(root: Path, *, status: ExecutionStatus = ExecutionStatus.CO
         status=status,
         started_at="2026-09-12T00:00:00+00:00",
         finished_at="2026-09-12T00:00:01+00:00",
-        exit_code=0 if status is ExecutionStatus.COMPLETED else 1,
-        output_text="answer",
+        exit_code=0 if successful else 1,
+        available_outputs=frozenset({ExecutorOutput.FINAL_TEXT}) if output_text is not None else frozenset(),
+        failure=None if successful else Failure(FailureKind.PROCESS, "test_failure", FailureImpact.RUN),
+        output_text=output_text,
     )
 
 

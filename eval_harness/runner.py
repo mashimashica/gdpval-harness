@@ -26,6 +26,7 @@ from eval_harness.evaluators.base import (
     EvaluatorType,
 )
 from eval_harness.executors.base import ExecutionRequest, ExecutionResult, ExecutionStatus, Executor
+from eval_harness.failures import FailureImpact, FailureKind, RunAbort
 from eval_harness.interventions.base import (
     Intervention,
     InterventionApplication,
@@ -148,6 +149,17 @@ def _evaluation_interrupt_payload(exc: BaseException) -> dict[str, object]:
 
 def _execution_payload(result: ExecutionResult) -> dict[str, object]:
     return execution_record(result)
+
+
+def _execution_failure_evaluation_payload() -> dict[str, object]:
+    """Record the stable evaluation outcome for a systemic executor failure."""
+
+    return {
+        "status": EvaluationStatus.SKIPPED.value,
+        "metrics": {},
+        "outcomes": {},
+        "details": {"reason": "executor failure prevented evaluation"},
+    }
 
 
 def _aggregate_metrics(rows: list[dict[str, object]]) -> dict[str, float]:
@@ -764,6 +776,12 @@ def run_benchmark(
                     _write_run_metadata(metadata_path, base_metadata, status=run_status, rows=rows)
                     raise
 
+                if result.failure is not None and result.failure.impact is FailureImpact.RUN:
+                    persist_row(_execution_failure_evaluation_payload())
+                    run_status = "interrupted" if result.status is ExecutionStatus.INTERRUPTED else "failed"
+                    _write_run_metadata(metadata_path, base_metadata, status=run_status, rows=rows)
+                    raise RunAbort(result.failure)
+
                 candidate = EvaluationCandidate(
                     candidate_id="candidate",
                     execution=result,
@@ -805,6 +823,13 @@ def run_benchmark(
                 if result.status not in _SUCCESS_STATUSES:
                     run_status = "failed"
                     break
+    except RunAbort as exc:
+        if exc.failure.kind is FailureKind.INTERRUPTED:
+            run_status = "interrupted"
+        else:
+            run_status = "failed"
+        _write_run_metadata(metadata_path, base_metadata, status=run_status, rows=rows)
+        raise
     except KeyboardInterrupt:
         run_status = "interrupted"
         _write_run_metadata(metadata_path, base_metadata, status=run_status, rows=rows)

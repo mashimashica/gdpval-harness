@@ -27,6 +27,7 @@ from eval_harness.builders.base import (
 )
 from eval_harness.builders.executor_skill import ExecutorSkillBuilder
 from eval_harness.builders.inputs import load_builder_input_bundle
+from eval_harness.capabilities import ExecutorOutput
 from eval_harness.evaluators.base import (
     EvaluationPlan,
     EvaluationRequest,
@@ -52,6 +53,7 @@ from eval_harness.experiments.base import (
     ExperimentRunSummary,
     LoadedExperimentProfile,
 )
+from eval_harness.failures import Failure, FailureImpact, FailureKind
 from eval_harness.interventions import load_agent_skill_bundle
 from eval_harness.provenance import RepositoryProvenance, canonical_json_sha256
 from eval_harness.runner import RunSummary
@@ -121,6 +123,7 @@ class ReliabilityApplicationExecutor(Executor):
         request.deliverables_dir.mkdir(parents=True, exist_ok=True)
         if self.raise_on_execute is not None:
             raise self.raise_on_execute
+        successful = self.status in {ExecutionStatus.COMPLETED, ExecutionStatus.NO_DELIVERABLE}
         return ExecutionResult(
             task_id=request.task.task_id,
             executor=self.name,
@@ -132,7 +135,9 @@ class ReliabilityApplicationExecutor(Executor):
             status=self.status,
             started_at="2026-09-12T00:00:00+00:00",
             finished_at="2026-09-12T00:00:01+00:00",
-            exit_code=0,
+            exit_code=0 if successful else 1,
+            available_outputs=frozenset(),
+            failure=None if successful else Failure(FailureKind.PROCESS, "test_failure", FailureImpact.RUN),
         )
 
 
@@ -168,6 +173,8 @@ class ReliabilityBuilderExecutor(Executor):
             started_at="2026-09-12T00:00:00+00:00",
             finished_at="2026-09-12T00:00:01+00:00",
             exit_code=0,
+            available_outputs=frozenset({ExecutorOutput.ARTIFACT_FILES}),
+            failure=None,
         )
 
 
@@ -541,6 +548,8 @@ class ExperimentReliabilityTests(unittest.TestCase):
                 started_at="start",
                 finished_at="finish",
                 exit_code=0,
+                available_outputs=frozenset({ExecutorOutput.ARTIFACT_FILES}),
+                failure=None,
             )
             request = BuildRequest(
                 "schedule",

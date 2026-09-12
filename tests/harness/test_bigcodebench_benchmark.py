@@ -11,9 +11,11 @@ from pathlib import Path
 from unittest.mock import patch
 
 from eval_harness.benchmarks.bigcodebench import BigCodeBenchBenchmark
+from eval_harness.capabilities import ExecutorOutput
 from eval_harness.evaluators.base import EvaluationCandidate, EvaluationRequest, EvaluatorType
 from eval_harness.evaluators.bigcodebench import BigCodeBenchEvaluator, _native_bigcodebench_evaluate
 from eval_harness.executors.base import ExecutionResult, ExecutionStatus
+from eval_harness.failures import Failure, FailureImpact, FailureKind
 
 
 class BigCodeBenchBenchmarkTests(unittest.TestCase):
@@ -49,6 +51,9 @@ class BigCodeBenchBenchmarkTests(unittest.TestCase):
         output_text: str | None,
         status: ExecutionStatus = ExecutionStatus.NO_DELIVERABLE,
     ) -> ExecutionResult:
+        effective_output = (
+            output_text if status in {ExecutionStatus.COMPLETED, ExecutionStatus.NO_DELIVERABLE} else None
+        )
         return ExecutionResult(
             task_id="BigCodeBench/1",
             executor="codex",
@@ -60,8 +65,12 @@ class BigCodeBenchBenchmarkTests(unittest.TestCase):
             status=status,
             started_at="2026-09-11T00:00:00+00:00",
             finished_at="2026-09-11T00:00:01+00:00",
-            exit_code=0 if status is ExecutionStatus.NO_DELIVERABLE else 1,
-            output_text=output_text,
+            exit_code=0 if status in {ExecutionStatus.COMPLETED, ExecutionStatus.NO_DELIVERABLE} else 1,
+            available_outputs=frozenset({ExecutorOutput.FINAL_TEXT}) if effective_output is not None else frozenset(),
+            failure=None
+            if effective_output is not None
+            else Failure(FailureKind.PROCESS, "test_failure", FailureImpact.RUN),
+            output_text=effective_output,
         )
 
     def request(self, root: Path, result: ExecutionResult) -> EvaluationRequest:

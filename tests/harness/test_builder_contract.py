@@ -22,6 +22,7 @@ from eval_harness.builders import (
     canonical_builder_input_manifest_bytes,
 )
 from eval_harness.executors.base import ExecutionResult, ExecutionStatus, TaskSpec
+from eval_harness.failures import Failure, FailureImpact, FailureKind
 from eval_harness.interventions.base import (
     ApplicationMapping,
     InterventionBundle,
@@ -89,7 +90,11 @@ class BuilderContractTests(unittest.TestCase):
             status=status,
             started_at="2026-01-01T00:00:00Z",
             finished_at="2026-01-01T00:00:01Z",
-            exit_code=0,
+            exit_code=0 if status in {ExecutionStatus.COMPLETED, ExecutionStatus.NO_DELIVERABLE} else 1,
+            available_outputs=frozenset(),
+            failure=None
+            if status in {ExecutionStatus.COMPLETED, ExecutionStatus.NO_DELIVERABLE}
+            else Failure(FailureKind.PROCESS, "test_failure", FailureImpact.RUN),
         )
 
     def intervention_bundle(self) -> InterventionBundle:

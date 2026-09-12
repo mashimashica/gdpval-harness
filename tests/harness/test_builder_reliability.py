@@ -36,6 +36,7 @@ from eval_harness.builders.inputs import (
     stage_builder_inputs,
     verify_staged_builder_inputs,
 )
+from eval_harness.capabilities import ExecutorOutput
 from eval_harness.executors.base import (
     ExecutionRequest,
     ExecutionResult,
@@ -44,6 +45,7 @@ from eval_harness.executors.base import (
     PreflightResult,
     TaskSpec,
 )
+from eval_harness.failures import Failure, FailureImpact, FailureKind
 from eval_harness.interventions import InterventionBundle, load_agent_skill_bundle
 from eval_harness.interventions.base import (
     InterventionFile,
@@ -101,6 +103,7 @@ class ReliabilityExecutor(Executor):
                 "---\nname: reliability-skill\ndescription: reliable skill\n---\n\nUse it.\n",
                 encoding="utf-8",
             )
+        successful = self.status in {ExecutionStatus.COMPLETED, ExecutionStatus.NO_DELIVERABLE}
         return ExecutionResult(
             task_id=self.result_task_id or request.task.task_id,
             executor=self.result_executor or self.name,
@@ -112,7 +115,11 @@ class ReliabilityExecutor(Executor):
             status=self.status,
             started_at="2026-09-12T00:00:00+00:00",
             finished_at="2026-09-12T00:00:01+00:00",
-            exit_code=0,
+            exit_code=0 if successful else 1,
+            available_outputs=(
+                frozenset({ExecutorOutput.ARTIFACT_FILES}) if self.status is ExecutionStatus.COMPLETED else frozenset()
+            ),
+            failure=None if successful else Failure(FailureKind.PROCESS, "test_failure", FailureImpact.RUN),
         )
 
 
@@ -148,6 +155,7 @@ class BuilderReliabilityTests(unittest.TestCase):
         )
 
     def _execution(self, status: ExecutionStatus = ExecutionStatus.COMPLETED) -> ExecutionResult:
+        successful = status in {ExecutionStatus.COMPLETED, ExecutionStatus.NO_DELIVERABLE}
         return ExecutionResult(
             task_id="task-reliability",
             executor="reliability-executor",
@@ -159,7 +167,9 @@ class BuilderReliabilityTests(unittest.TestCase):
             status=status,
             started_at="2026-09-12T00:00:00+00:00",
             finished_at="2026-09-12T00:00:01+00:00",
-            exit_code=0,
+            exit_code=0 if successful else 1,
+            available_outputs=frozenset(),
+            failure=None if successful else Failure(FailureKind.PROCESS, "test_failure", FailureImpact.RUN),
         )
 
     def test_manifest_and_build_records_reject_ambiguous_contracts(self) -> None:

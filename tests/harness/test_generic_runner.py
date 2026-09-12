@@ -15,6 +15,7 @@ from unittest.mock import patch
 
 import eval_harness.runner as runner_module
 from eval_harness.benchmarks.base import Benchmark, BenchmarkTask
+from eval_harness.capabilities import ExecutorOutput
 from eval_harness.evaluators.base import (
     EvaluationPlan,
     EvaluationRequest,
@@ -34,6 +35,7 @@ from eval_harness.executors.base import (
     PreflightResult,
     TaskSpec,
 )
+from eval_harness.failures import Failure, FailureImpact, FailureKind
 from eval_harness.interventions.agent_skill import AgentSkillIntervention, load_agent_skill_bundle
 from eval_harness.interventions.base import (
     ApplicationMapping,
@@ -300,6 +302,7 @@ class FakeExecutor(Executor):
         self.environments.append(dict(request.environment))
         failed = self.fail_on_call == self.calls
         status = ExecutionStatus.FAILED if failed else ExecutionStatus.NO_DELIVERABLE
+        output_text = None if failed else self.result_output_text
         request.executor_dir.mkdir(parents=True, exist_ok=True)
         (request.executor_dir / "stdout.log").write_text("fake\n", encoding="utf-8")
         deliverables_dir = request.deliverables_dir
@@ -320,7 +323,9 @@ class FakeExecutor(Executor):
             started_at="2026-09-11T00:00:00+00:00",
             finished_at="2026-09-11T00:00:01+00:00",
             exit_code=1 if failed else 0,
-            output_text=self.result_output_text,
+            available_outputs=frozenset({ExecutorOutput.FINAL_TEXT}) if output_text is not None else frozenset(),
+            failure=None if not failed else Failure(FailureKind.PROCESS, "test_failure", FailureImpact.RUN),
+            output_text=output_text,
             metadata=self.result_metadata,
         )
 
