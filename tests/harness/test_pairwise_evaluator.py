@@ -62,6 +62,7 @@ class FakeJudge(JudgeExecutor):
 
 def _execution(root: Path, label: str) -> ExecutionResult:
     return ExecutionResult(
+        runtime="test",
         task_id="task/x",
         executor=label,
         executor_version="1",
@@ -168,6 +169,7 @@ class PairwiseEvaluatorTests(unittest.TestCase):
             assert second.artifacts_dir is not None
             failed = _execution(second.artifacts_dir, "b")
             failed = ExecutionResult(
+                runtime="test",
                 task_id=failed.task_id,
                 executor=failed.executor,
                 executor_version=failed.executor_version,

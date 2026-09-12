@@ -25,11 +25,15 @@ from eval_harness.executors.base import (
 )
 from eval_harness.failures import Failure, FailureImpact, FailureKind
 from eval_harness.interventions import AgentSkillIntervention
+from eval_harness.reasoning import ReasoningEffortOption
 
 
 class DeterministicExecutor(Executor):
     name = "deterministic"
+    runtime = "test"
     invocation_mode = "deterministic-test"
+    network_access_enabled: bool = False
+    reasoning_effort: ReasoningEffortOption = None
 
     def __init__(
         self,
@@ -104,6 +108,7 @@ class DeterministicExecutor(Executor):
         successful = self.status in {ExecutionStatus.COMPLETED, ExecutionStatus.NO_DELIVERABLE}
         output_text = "BUILDER-OUTPUT-SENTINEL" if successful else None
         return ExecutionResult(
+            runtime="test",
             task_id=self.result_task_id or request.task.task_id,
             executor=self.result_executor or self.name,
             executor_version="deterministic-1",
@@ -124,7 +129,10 @@ class DeterministicExecutor(Executor):
 
 class ApplicationExecutor(Executor):
     name = "application-deterministic"
+    runtime = "test"
     invocation_mode = "deterministic-application-test"
+    network_access_enabled: bool = False
+    reasoning_effort: ReasoningEffortOption = None
 
     def __init__(self) -> None:
         self.execute_calls = 0
@@ -139,6 +147,7 @@ class ApplicationExecutor(Executor):
         request.executor_dir.mkdir()
         request.deliverables_dir.mkdir()
         return ExecutionResult(
+            runtime="test",
             task_id=request.task.task_id,
             executor=self.name,
             executor_version="application-1",

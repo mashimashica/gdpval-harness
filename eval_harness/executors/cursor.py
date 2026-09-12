@@ -6,8 +6,11 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import platform
+import re
 import shutil
 import subprocess
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Mapping
@@ -20,13 +23,36 @@ from eval_harness.executors.base import (
     Executor,
     PreflightResult,
 )
+from eval_harness.executors.output_protocol import (
+    OutputProtocolError,
+    parse_cursor_output,
+    parse_cursor_status,
+    parse_strict_json_object,
+)
 from eval_harness.failures import Failure, FailureImpact, FailureKind
+from eval_harness.reasoning import ReasoningEffortOption
 
 
-_API_ENV_VARS = {"CURSOR_API_KEY", "CURSOR_AUTH_TOKEN"}
-_NEGATIVE_STATUS_MARKERS = ("not authenticated", "not logged in", "unauthenticated")
-_API_STATUS_MARKERS = ("api key", "api-key", "apikey", "auth token", "bearer token")
-_ACCOUNT_STATUS_MARKERS = ("authenticated", "logged in", "account")
+_API_ENV_VARS = {
+    "CURSOR_API_KEY",
+    "CURSOR_AUTH_TOKEN",
+    "CURSOR_LOCAL_PROVIDER",
+    "CURSOR_LOCAL_PROVIDER_URL",
+    "CURSOR_USE_LOCAL_PROVIDER",
+    "CURSOR_USE_BEDROCK",
+    "CURSOR_BASE_URL",
+    "CURSOR_API_BASE_URL",
+    "CURSOR_API_URL",
+    "CURSOR_BEDROCK_ENDPOINT",
+    "CURSOR_BEDROCK_ENDPOINT_URL",
+    "BEDROCK_ENDPOINT_URL",
+    "AWS_BEDROCK_ENDPOINT_URL",
+    "AWS_ENDPOINT_URL_BEDROCK",
+}
+_COMMAND_ENV = "EVAL_CURSOR_COMMAND"
+_SUPPORTED_VERSION = "2026.09.10-fd3934a"
+_VERSION_PATTERN = re.compile(r"(?<![A-Za-z0-9])2026\.09\.10-fd3934a(?![A-Za-z0-9-])")
+_CURSOR_AUTH_STORE_RELATIVE_PATH = Path("cursor") / "auth.json"
 
 
 def _utc_now() -> str:
@@ -62,18 +88,79 @@ def subscription_environment(base: Mapping[str, str] | None = None) -> dict[str,
     return env
 
 
+def _version_is_supported(version: str | None) -> bool:
+    return version is not None and _VERSION_PATTERN.search(version) is not None
+
+
+def _platform_is_supported() -> bool:
+    return sys.platform.startswith("linux") and platform.machine().lower() in {"x86_64", "amd64"}
+
+
+def _cursor_auth_store_path() -> Path | None:
+    configured_home = os.getenv("XDG_CONFIG_HOME")
+    if configured_home:
+        path = Path(configured_home)
+        if not path.is_absolute():
+            return None
+        return path / _CURSOR_AUTH_STORE_RELATIVE_PATH
+    return Path.home() / ".config" / _CURSOR_AUTH_STORE_RELATIVE_PATH
+
+
+def _is_empty_optional_credential(value: object) -> bool:
+    # The published Cursor file credential manager treats object/array values
+    # as configured credentials (JavaScript truthiness), even when empty.
+    # Only the absent/null and canonical empty-string forms mean unset.
+    return value is None or (isinstance(value, str) and value == "")
+
+
+def _cursor_auth_store_error() -> str | None:
+    """Return a static error when the local Cursor store is not account-only."""
+
+    path = _cursor_auth_store_path()
+    if path is None:
+        return "Cursor account auth store location is invalid"
+    try:
+        payload = parse_strict_json_object(path.read_bytes())
+    except (OSError, OutputProtocolError):
+        return "Cursor account auth store is unavailable or malformed"
+
+    access_token = payload.get("accessToken")
+    refresh_token = payload.get("refreshToken")
+    if (
+        not isinstance(access_token, str)
+        or not access_token.strip()
+        or not isinstance(refresh_token, str)
+        or not refresh_token.strip()
+    ):
+        return "Cursor account auth store lacks both required account tokens"
+    if access_token == refresh_token:
+        return "Cursor account auth store contains equal account tokens"
+
+    api_key = payload.get("apiKey")
+    if not _is_empty_optional_credential(api_key):
+        return "Cursor API-key authentication is not an account subscription"
+    bedrock_credentials = payload.get("bedrockCredentials")
+    if not _is_empty_optional_credential(bedrock_credentials):
+        return "Cursor Bedrock authentication is not an account subscription"
+    return None
+
+
 class CursorExecutor(Executor):
     name = "cursor"
+    runtime = "host-subprocess"
     invocation_mode = "agent -p"
     tool_permission_mode = "project allowlist + Cursor sandbox"
+    reasoning_effort: ReasoningEffortOption = None
     capabilities = ExecutorCapabilities(
         inputs=frozenset({ExecutorInput.PROMPT_TEXT, ExecutorInput.WORKSPACE_FILES}),
-        outputs=frozenset({ExecutorOutput.ARTIFACT_FILES}),
+        outputs=frozenset({ExecutorOutput.FINAL_TEXT, ExecutorOutput.ARTIFACT_FILES}),
     )
 
     def __init__(self, *, network_enabled: bool = False, command: str | None = None) -> None:
-        self.network_enabled = network_enabled
-        resolved_command = command or os.getenv("GDPVAL_CURSOR_COMMAND", "agent")
+        if type(network_enabled) is not bool:
+            raise TypeError("network_enabled must be a bool")
+        self.network_access_enabled = network_enabled
+        resolved_command = command or os.getenv(_COMMAND_ENV, "agent")
         if resolved_command is None:
             raise RuntimeError("Cursor Agent command could not be resolved")
         self.command = resolved_command
@@ -102,10 +189,24 @@ class CursorExecutor(Executor):
                 executor=self.name, ok=False, details=(f"Cursor Agent command not found: {self.command}",)
             )
 
+        if not _platform_is_supported():
+            return PreflightResult(
+                executor=self.name,
+                ok=False,
+                details=("Cursor Agent support is limited to the published Linux x86_64 build",),
+            )
+
         version = self.version()
+        if not _version_is_supported(version):
+            return PreflightResult(
+                executor=self.name,
+                ok=False,
+                version=version,
+                details=(f"Cursor Agent build must be exactly {_SUPPORTED_VERSION}",),
+            )
         try:
             status = subprocess.run(
-                [self.command, "status"],
+                [self.command, "status", "--format", "json"],
                 check=False,
                 capture_output=True,
                 text=True,
@@ -121,30 +222,41 @@ class CursorExecutor(Executor):
                 details=(f"could not inspect Cursor Agent login status: {exc}",),
             )
 
-        raw = f"{status.stdout}\n{status.stderr}".strip()
-        normalized = raw.lower()
-        if status.returncode != 0 or any(marker in normalized for marker in _NEGATIVE_STATUS_MARKERS):
+        raw = status.stdout or status.stderr
+        if status.returncode != 0:
             return PreflightResult(
                 executor=self.name,
                 ok=False,
                 version=version,
-                details=(raw or "Cursor Agent is not authenticated",),
+                details=("Cursor Agent status command failed; account authentication was not verified",),
             )
-        if any(marker in normalized for marker in _API_STATUS_MARKERS):
-            return PreflightResult(
-                executor=self.name,
-                ok=False,
-                version=version,
-                auth_mode="api",
-                details=("Cursor API/token authentication is not permitted for account-backed execution",),
-            )
-        if not raw or not any(marker in normalized for marker in _ACCOUNT_STATUS_MARKERS):
+        try:
+            parsed_status = parse_cursor_status(raw)
+        except OutputProtocolError:
             return PreflightResult(
                 executor=self.name,
                 ok=False,
                 version=version,
                 auth_mode="unknown",
-                details=("Cursor status did not positively identify an authenticated account; refusing execution",),
+                details=("Cursor Agent status did not return the documented JSON schema",),
+            )
+        if not parsed_status.is_authenticated:
+            return PreflightResult(
+                executor=self.name,
+                ok=False,
+                version=version,
+                auth_mode="cursor-account",
+                details=("Cursor Agent account authentication is incomplete",),
+            )
+
+        auth_store_error = _cursor_auth_store_error()
+        if auth_store_error is not None:
+            return PreflightResult(
+                executor=self.name,
+                ok=False,
+                version=version,
+                auth_mode="unknown",
+                details=(auth_store_error,),
             )
 
         return PreflightResult(
@@ -152,13 +264,13 @@ class CursorExecutor(Executor):
             ok=True,
             version=version,
             auth_mode="cursor-account",
-            details=("Cursor account login detected with API/token environment variables removed",),
+            details=("Cursor account login detected with alternate provider environment variables removed",),
         )
 
     def _write_workspace_policy(self, workspace: Path, readonly_reference_path: Path | None = None) -> None:
         cursor_dir = workspace / ".cursor"
         cursor_dir.mkdir(parents=True, exist_ok=True)
-        network_default = "allow" if self.network_enabled else "deny"
+        network_default = "allow" if self.network_access_enabled else "deny"
         sandbox = {
             "type": "workspace_readwrite",
             "additionalReadwritePaths": [],
@@ -178,7 +290,7 @@ class CursorExecutor(Executor):
             "Read(.env*)",
             "Write(.env*)",
         ]
-        if not self.network_enabled:
+        if not self.network_access_enabled:
             deny.append("WebFetch(*)")
         cli_config = {
             "version": 1,
@@ -240,11 +352,6 @@ class CursorExecutor(Executor):
         ]
         if request.model:
             command.extend(["--model", request.model])
-        command.append(
-            "Read GDPVAL_TASK.md in this local workspace and complete it. "
-            "Write only final submitted artifacts under ./deliverables/. "
-            "Do not hand off to a Cloud Agent and do not prefix any message with '&'."
-        )
         return command
 
     def execute(self, request: ExecutionRequest) -> ExecutionResult:
@@ -253,8 +360,6 @@ class CursorExecutor(Executor):
         request.executor_dir.mkdir(parents=True, exist_ok=True)
         protected_references, reference_digest = self._isolate_reference_files(request.workspace)
         self._write_workspace_policy(request.workspace, protected_references)
-        task_path = request.workspace / "GDPVAL_TASK.md"
-        task_path.write_text(request.task.prompt, encoding="utf-8")
         (request.executor_dir / "prompt.txt").write_text(request.task.prompt, encoding="utf-8")
 
         started_at = _utc_now()
@@ -266,11 +371,14 @@ class CursorExecutor(Executor):
         stderr = ""
         reference_integrity_ok = True
         has_deliverable = False
+        output_text: str | None = None
+        protocol_error: str | None = None
         failure: Failure | None = None
 
         try:
             completed = subprocess.run(
                 self.build_command(request),
+                input=request.task.prompt,
                 capture_output=True,
                 text=True,
                 errors="replace",
@@ -280,8 +388,8 @@ class CursorExecutor(Executor):
                 check=False,
             )
             exit_code = completed.returncode
-            stdout = completed.stdout or ""
-            stderr = completed.stderr or ""
+            stdout = _text(completed.stdout)
+            stderr = _text(completed.stderr)
             if protected_references is not None and reference_digest is not None:
                 reference_integrity_ok = _tree_digest(protected_references) == reference_digest
                 if not reference_integrity_ok:
@@ -290,8 +398,21 @@ class CursorExecutor(Executor):
             if exit_code != 0 and failure is None:
                 failure = Failure(FailureKind.PROCESS, "process_exit", FailureImpact.RUN)
             if exit_code == 0 and reference_integrity_ok:
-                has_deliverable = any(path.is_file() for path in request.deliverables_dir.rglob("*"))
-                status = ExecutionStatus.COMPLETED if has_deliverable else ExecutionStatus.NO_DELIVERABLE
+                try:
+                    parsed = parse_cursor_output(stdout)
+                except OutputProtocolError as exc:
+                    failure = Failure(FailureKind.PROTOCOL, "output_protocol", FailureImpact.RUN)
+                    protocol_error = exc.code.value
+                else:
+                    output_text = parsed.output_text
+                    has_deliverable = request.deliverables_dir.is_dir() and any(
+                        path.is_file() for path in request.deliverables_dir.rglob("*")
+                    )
+                    status = (
+                        ExecutionStatus.COMPLETED
+                        if output_text is not None or has_deliverable
+                        else ExecutionStatus.NO_DELIVERABLE
+                    )
         except subprocess.TimeoutExpired as exc:
             stdout = _text(exc.stdout)
             stderr = _text(exc.stderr)
@@ -309,9 +430,31 @@ class CursorExecutor(Executor):
             stdout_path.write_text(stdout, encoding="utf-8")
             stderr_path.write_text(stderr, encoding="utf-8")
 
-        available_outputs: frozenset[ExecutorOutput] = frozenset(
-            {ExecutorOutput.ARTIFACT_FILES} if failure is None else ()
+        available_outputs: frozenset[ExecutorOutput] = (
+            frozenset(
+                output
+                for output, present in (
+                    (ExecutorOutput.FINAL_TEXT, output_text is not None),
+                    (ExecutorOutput.ARTIFACT_FILES, True),
+                )
+                if present
+            )
+            if failure is None
+            else frozenset()
         )
+        metadata: dict[str, object] = {
+            "sandbox": "enabled/workspace_readwrite",
+            "tool_permission_mode": self.tool_permission_mode,
+            "network_policy": "allow" if self.network_access_enabled else "deny",
+            "cloud_execution": False,
+            "structured_output": "json",
+            "usage_mode": "cursor-account-usage",
+            "reference_files_isolation": "outside-workspace + additionalReadonlyPaths",
+            "reference_integrity_verified": reference_integrity_ok,
+            "api_environment_removed": sorted(_API_ENV_VARS),
+        }
+        if protocol_error is not None:
+            metadata["protocol_error"] = protocol_error
         return ExecutionResult(
             task_id=request.task.task_id,
             executor=self.name,
@@ -326,16 +469,10 @@ class CursorExecutor(Executor):
             exit_code=exit_code,
             available_outputs=available_outputs,
             failure=failure,
-            metadata={
-                "sandbox": "enabled/workspace_readwrite",
-                "tool_permission_mode": self.tool_permission_mode,
-                "network_policy": "allow" if self.network_enabled else "deny",
-                "cloud_execution": False,
-                "structured_output": "json",
-                "usage_mode": "cursor-account-usage",
-                "reference_files_isolation": "outside-workspace + additionalReadonlyPaths",
-                "reference_integrity_verified": reference_integrity_ok,
-                "api_environment_removed": sorted(_API_ENV_VARS),
-                "command": self.build_command(request),
-            },
+            output_text=output_text,
+            metadata=metadata,
+            runtime="host-subprocess",
+            model_id=request.model or None,
+            effective_reasoning_effort=None,
+            effective_reasoning_effort_available=False,
         )

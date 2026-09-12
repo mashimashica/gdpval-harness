@@ -56,9 +56,13 @@ class ExecutionResult:
     exit_code: int | None
     available_outputs: frozenset[ExecutorOutput]
     failure: Failure | None
+    runtime: str
     output_text: str | None = None
     metadata: Mapping[str, object] = field(default_factory=dict)
     reasoning_effort_requested: ReasoningEffortOption = None
+    model_id: str | None = None
+    effective_reasoning_effort: ReasoningEffortOption = None
+    effective_reasoning_effort_available: bool = False
 
     def __post_init__(self) -> None:
         try:
@@ -71,6 +75,15 @@ class ExecutionResult:
             raise ValueError("available outputs must use supported executor output channels") from exc
         if self.output_text is not None and not isinstance(self.output_text, str):
             raise TypeError("execution output text must be a string or None")
+        if not isinstance(self.runtime, str) or not self.runtime.strip():
+            raise ValueError("execution runtime must be a non-empty string")
+        if self.model_id is not None and (not isinstance(self.model_id, str) or not self.model_id.strip()):
+            raise ValueError("execution model_id must be a non-empty string or None")
+        if type(self.effective_reasoning_effort_available) is not bool:
+            raise TypeError("effective reasoning effort availability must be a bool")
+        effective_reasoning_effort = validate_reasoning_effort(self.effective_reasoning_effort)
+        if not self.effective_reasoning_effort_available and effective_reasoning_effort is not None:
+            raise ValueError("unavailable effective reasoning effort must be None")
         final_text_present = ExecutorOutput.FINAL_TEXT in available_outputs
         if final_text_present != (self.output_text is not None):
             raise ValueError("FINAL_TEXT availability must match output_text presence")
@@ -93,6 +106,7 @@ class ExecutionResult:
             "reasoning_effort_requested",
             validate_reasoning_effort(self.reasoning_effort_requested),
         )
+        object.__setattr__(self, "effective_reasoning_effort", effective_reasoning_effort)
 
 
 @dataclass(frozen=True)
@@ -108,7 +122,10 @@ class Executor(ABC):
     """Agent runtime contract; benchmarks, interventions, providers, and evaluators are separate concerns."""
 
     name: str
+    runtime: str
     invocation_mode: str
+    network_access_enabled: bool
+    reasoning_effort: ReasoningEffortOption
     capabilities: ExecutorCapabilities
 
     @abstractmethod

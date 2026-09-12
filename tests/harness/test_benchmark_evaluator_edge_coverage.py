@@ -66,6 +66,7 @@ def _execution(
     execution_deliverables.mkdir(parents=True, exist_ok=True)
     effective_output = output_text if status in {ExecutionStatus.COMPLETED, ExecutionStatus.NO_DELIVERABLE} else None
     return ExecutionResult(
+        runtime="test",
         task_id=task_id,
         executor="fake",
         executor_version="fake-1",

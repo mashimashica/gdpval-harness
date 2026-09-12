@@ -52,11 +52,15 @@ from eval_harness.interventions.base import (
     compute_bundle_sha256,
     file_evidence,
 )
+from eval_harness.reasoning import ReasoningEffortOption
 
 
 class ReliabilityExecutor(Executor):
     name = "reliability-executor"
+    runtime = "test"
     invocation_mode = "deterministic"
+    network_access_enabled: bool = False
+    reasoning_effort: ReasoningEffortOption = None
 
     def __init__(
         self,
@@ -105,6 +109,7 @@ class ReliabilityExecutor(Executor):
             )
         successful = self.status in {ExecutionStatus.COMPLETED, ExecutionStatus.NO_DELIVERABLE}
         return ExecutionResult(
+            runtime="test",
             task_id=self.result_task_id or request.task.task_id,
             executor=self.result_executor or self.name,
             executor_version="reliability-1",
@@ -157,6 +162,7 @@ class BuilderReliabilityTests(unittest.TestCase):
     def _execution(self, status: ExecutionStatus = ExecutionStatus.COMPLETED) -> ExecutionResult:
         successful = status in {ExecutionStatus.COMPLETED, ExecutionStatus.NO_DELIVERABLE}
         return ExecutionResult(
+            runtime="test",
             task_id="task-reliability",
             executor="reliability-executor",
             executor_version="1",

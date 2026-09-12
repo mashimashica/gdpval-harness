@@ -22,7 +22,7 @@ _EXECUTORS = {
         name="claude-code",
         runtime="Claude Code (local)",
         usage_mode="Claude subscription login only",
-        generic_runner_status="supported where listed by benchmark",
+        generic_runner_status="available for capability-compatible requests",
     ),
     "codex": ExecutorDescriptor(
         name="codex",
@@ -34,13 +34,13 @@ _EXECUTORS = {
         name="cursor",
         runtime="Cursor Agent CLI (local)",
         usage_mode="Cursor account/plan usage; API-key auth rejected",
-        generic_runner_status="supported where listed by benchmark",
+        generic_runner_status="available for capability-compatible requests",
     ),
     "stirrup": ExecutorDescriptor(
         name="stirrup",
         runtime="NeMo Gym / Stirrup",
         usage_mode="provider-backed model API",
-        generic_runner_status="legacy ./gdpval path only",
+        generic_runner_status="not available through the generic runner until PR07 integration",
     ),
 }
 

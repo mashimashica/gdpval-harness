@@ -80,7 +80,23 @@ if args[:2] == ["auth", "status"]:
     emit(sys.stdout, payload.encode() + b"\\n")
     sys.exit(int(os.environ.get("GDPVAL_FAKE_STATUS_EXIT", "0")))
 if args[:1] == ["status"]:
-    emit(sys.stdout, os.environ.get("GDPVAL_FAKE_CURSOR_STATUS", "logged in account").encode() + b"\\n")
+    cursor_status = os.environ.get("GDPVAL_FAKE_CURSOR_STATUS", "account")
+    if cursor_status in {"account", "logged in account", "authenticated account"}:
+        cursor_status = (
+            '{"status":"authenticated","isAuthenticated":true,"hasAccessToken":true,'
+            '"hasRefreshToken":true,"userInfo":{"email":"fake@example.invalid"}}'
+        )
+    elif cursor_status == "API key authentication":
+        cursor_status = (
+            '{"status":"authenticated","isAuthenticated":true,"hasAccessToken":true,'
+            '"hasRefreshToken":true,"message":"Logged in (unable to fetch user details)"}'
+        )
+    elif cursor_status == "not authenticated":
+        cursor_status = (
+            '{"status":"unauthenticated","isAuthenticated":false,"hasAccessToken":false,'
+            '"hasRefreshToken":false}'
+        )
+    emit(sys.stdout, cursor_status.encode() + b"\\n")
     sys.exit(int(os.environ.get("GDPVAL_FAKE_STATUS_EXIT", "0")))
 if "sandbox" in args:
     sys.exit(int(os.environ.get("GDPVAL_FAKE_SANDBOX_EXIT", "0")))
@@ -108,9 +124,36 @@ if final_index in args:
         final_path.write_bytes(b"final response \\xff\\n")
     else:
         final_path.write_bytes(os.environ.get("GDPVAL_FAKE_FINAL", "final response\\n").encode())
-verdict = os.environ.get("GDPVAL_FAKE_VERDICT", "BOXED[A]")
-suffix = b"\\xff\\n" if os.environ.get("GDPVAL_FAKE_INVALID_STDOUT") == "1" else b"\\n"
-emit(sys.stdout, verdict.encode() + suffix)
+is_codex_executor = "--output-last-message" in args and "--sandbox" in args
+is_json_executor = "--output-format" in args and args[args.index("--output-format") + 1] == "json"
+if is_codex_executor:
+    emit(
+        sys.stdout,
+        b'{"type":"thread.started","thread_id":"fake-thread"}\\n'
+        b'{"type":"turn.started"}\\n'
+        b'{"type":"item.completed","item":{"id":"item","type":"agent_message",'
+        b'"text":"intermediate"}}\\n'
+        b'{"type":"turn.completed","usage":{"input_tokens":0,"cached_input_tokens":0,'
+        b'"output_tokens":0,"reasoning_output_tokens":0}}\\n',
+    )
+elif is_json_executor:
+    result = os.environ.get("GDPVAL_FAKE_RESULT", "final response\\n")
+    payload = {
+        "type": "result",
+        "subtype": "success",
+        "is_error": False,
+        "duration_ms": 1,
+        "duration_api_ms": 1,
+        "result": result,
+        "session_id": "fake-session",
+    }
+    if "--max-turns" in args:
+        payload["num_turns"] = 1
+    emit(sys.stdout, (json.dumps(payload) + "\\n").encode())
+else:
+    verdict = os.environ.get("GDPVAL_FAKE_VERDICT", "BOXED[A]")
+    suffix = b"\\xff\\n" if os.environ.get("GDPVAL_FAKE_INVALID_STDOUT") == "1" else b"\\n"
+    emit(sys.stdout, verdict.encode() + suffix)
 emit(sys.stderr, b"diagnostic \\xfe\\n")
 sys.exit(int(os.environ.get("GDPVAL_FAKE_EXIT", "0")))
 """
@@ -226,7 +269,12 @@ class ExecutorReliabilityTests(unittest.TestCase):
             command = _make_fake_cli(Path(tmp))
             for name, executor_factory in cases:
                 with self.subTest(executor=name):
-                    version = subprocess.CompletedProcess([], 0, "fake-version", "")
+                    version_text = {
+                        "codex": "codex 0.154.0",
+                        "claude-code": "Claude Code 2.1.259",
+                        "cursor": "2026.09.10-fd3934a",
+                    }[name]
+                    version = subprocess.CompletedProcess([], 0, version_text, "")
                     for failure in (OSError("status unavailable"), subprocess.TimeoutExpired([], 15)):
                         executor = executor_factory(command=str(command))
                         with patch.object(subprocess, "run", side_effect=[version, failure]) as run:
@@ -269,19 +317,34 @@ class ExecutorReliabilityTests(unittest.TestCase):
             missing_cursor = CursorExecutor(command=str(Path(tmp) / "missing-cursor"))
             self.assertFalse(missing_cursor.preflight().ok)
 
-            with patch.dict(os.environ, {"GDPVAL_FAKE_CODEX_AUTH": "API key login"}, clear=False):
+            with patch.dict(
+                os.environ,
+                {"GDPVAL_FAKE_CODEX_AUTH": "API key login", "GDPVAL_FAKE_VERSION": "codex 0.154.0"},
+                clear=False,
+            ):
                 result = CodexExecutor(command=str(command)).preflight()
             self.assertFalse(result.ok)
             self.assertEqual(result.auth_mode, "api")
 
-            with patch.dict(os.environ, {"GDPVAL_FAKE_CODEX_AUTH": "logged in as another provider"}, clear=False):
+            with patch.dict(
+                os.environ,
+                {
+                    "GDPVAL_FAKE_CODEX_AUTH": "logged in as another provider",
+                    "GDPVAL_FAKE_VERSION": "codex 0.154.0",
+                },
+                clear=False,
+            ):
                 result = CodexExecutor(command=str(command)).preflight()
             self.assertFalse(result.ok)
             self.assertEqual(result.auth_mode, "unknown")
 
             with patch.dict(
                 os.environ,
-                {"GDPVAL_FAKE_CODEX_AUTH": "not logged in", "GDPVAL_FAKE_STATUS_EXIT": "1"},
+                {
+                    "GDPVAL_FAKE_CODEX_AUTH": "not logged in",
+                    "GDPVAL_FAKE_STATUS_EXIT": "1",
+                    "GDPVAL_FAKE_VERSION": "codex 0.154.0",
+                },
                 clear=False,
             ):
                 result = CodexExecutor(command=str(command)).preflight()
@@ -290,7 +353,11 @@ class ExecutorReliabilityTests(unittest.TestCase):
 
             with patch.dict(
                 os.environ,
-                {"GDPVAL_FAKE_AUTH_JSON": "not json", "GDPVAL_FAKE_STATUS_EXIT": "0"},
+                {
+                    "GDPVAL_FAKE_AUTH_JSON": "not json",
+                    "GDPVAL_FAKE_STATUS_EXIT": "0",
+                    "GDPVAL_FAKE_VERSION": "Claude Code 2.1.259",
+                },
                 clear=False,
             ):
                 result = ClaudeCodeExecutor(command=str(command)).preflight()
@@ -309,6 +376,7 @@ class ExecutorReliabilityTests(unittest.TestCase):
                         }
                     ),
                     "GDPVAL_FAKE_STATUS_EXIT": "0",
+                    "GDPVAL_FAKE_VERSION": "Claude Code 2.1.259",
                 },
                 clear=False,
             ):
@@ -318,35 +386,76 @@ class ExecutorReliabilityTests(unittest.TestCase):
 
             with patch.dict(
                 os.environ,
-                {"GDPVAL_FAKE_AUTH_JSON": "", "GDPVAL_FAKE_STATUS_EXIT": "1"},
+                {
+                    "GDPVAL_FAKE_AUTH_JSON": "",
+                    "GDPVAL_FAKE_STATUS_EXIT": "1",
+                    "GDPVAL_FAKE_VERSION": "Claude Code 2.1.259",
+                },
                 clear=False,
             ):
                 result = ClaudeCodeExecutor(command=str(command)).preflight()
             self.assertFalse(result.ok)
             self.assertIn("not logged in", result.details[0])
 
-            with patch.dict(os.environ, {"GDPVAL_FAKE_CURSOR_STATUS": "API key authentication"}, clear=False):
-                result = CursorExecutor(command=str(command)).preflight()
-            self.assertFalse(result.ok)
-            self.assertEqual(result.auth_mode, "api")
-
-            with patch.dict(os.environ, {"GDPVAL_FAKE_CURSOR_STATUS": "present but unclear"}, clear=False):
+            with patch.dict(
+                os.environ,
+                {
+                    "GDPVAL_FAKE_CURSOR_STATUS": "API key authentication",
+                    "GDPVAL_FAKE_VERSION": "2026.09.10-fd3934a",
+                },
+                clear=False,
+            ):
                 result = CursorExecutor(command=str(command)).preflight()
             self.assertFalse(result.ok)
             self.assertEqual(result.auth_mode, "unknown")
 
-            with patch.dict(os.environ, {"GDPVAL_FAKE_CURSOR_STATUS": "not authenticated"}, clear=False):
+            with patch.dict(
+                os.environ,
+                {
+                    "GDPVAL_FAKE_CURSOR_STATUS": "present but unclear",
+                    "GDPVAL_FAKE_VERSION": "2026.09.10-fd3934a",
+                },
+                clear=False,
+            ):
                 result = CursorExecutor(command=str(command)).preflight()
             self.assertFalse(result.ok)
-            self.assertIn("not authenticated", result.details[0])
+            self.assertEqual(result.auth_mode, "unknown")
+
+            with patch.dict(
+                os.environ,
+                {
+                    "GDPVAL_FAKE_CURSOR_STATUS": "not authenticated",
+                    "GDPVAL_FAKE_VERSION": "2026.09.10-fd3934a",
+                },
+                clear=False,
+            ):
+                result = CursorExecutor(command=str(command)).preflight()
+            self.assertFalse(result.ok)
+            self.assertIn("incomplete", result.details[0])
 
     def test_preflight_accepts_positive_subscription_and_account_status(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             command = _make_fake_cli(Path(tmp))
+            config_home = Path(tmp) / "config"
+            auth_store = config_home / "cursor" / "auth.json"
+            auth_store.parent.mkdir(parents=True)
+            auth_store.write_text(
+                json.dumps({"accessToken": "access-fixture", "refreshToken": "refresh-fixture"}),
+                encoding="utf-8",
+            )
             with patch.dict(
                 os.environ,
                 {
                     "GDPVAL_FAKE_CODEX_AUTH": "ChatGPT subscription",
+                    "GDPVAL_FAKE_STATUS_EXIT": "0",
+                    "GDPVAL_FAKE_VERSION": "codex 0.154.0",
+                },
+                clear=False,
+            ):
+                codex = CodexExecutor(command=str(command)).preflight()
+            with patch.dict(
+                os.environ,
+                {
                     "GDPVAL_FAKE_AUTH_JSON": json.dumps(
                         {
                             "loggedIn": True,
@@ -355,13 +464,22 @@ class ExecutorReliabilityTests(unittest.TestCase):
                             "subscriptionType": "max",
                         }
                     ),
-                    "GDPVAL_FAKE_CURSOR_STATUS": "authenticated account",
                     "GDPVAL_FAKE_STATUS_EXIT": "0",
+                    "GDPVAL_FAKE_VERSION": "Claude Code 2.1.259",
                 },
                 clear=False,
             ):
-                codex = CodexExecutor(command=str(command)).preflight()
                 claude = ClaudeCodeExecutor(command=str(command)).preflight()
+            with patch.dict(
+                os.environ,
+                {
+                    "GDPVAL_FAKE_CURSOR_STATUS": "authenticated account",
+                    "GDPVAL_FAKE_STATUS_EXIT": "0",
+                    "GDPVAL_FAKE_VERSION": "2026.09.10-fd3934a",
+                    "XDG_CONFIG_HOME": str(config_home),
+                },
+                clear=False,
+            ):
                 cursor = CursorExecutor(command=str(command)).preflight()
             self.assertTrue(codex.ok)
             self.assertEqual(codex.auth_mode, "chatgpt-subscription")
@@ -386,7 +504,6 @@ class ExecutorReliabilityTests(unittest.TestCase):
                     environment = _local_environment(
                         GDPVAL_FAKE_MODE="success",
                         GDPVAL_FAKE_INVALID_STDOUT="1",
-                        GDPVAL_FAKE_FINAL_INVALID="1",
                         GDPVAL_CAPTURE_ENV=str(capture),
                         OPENAI_API_KEY="secret-openai",
                         ANTHROPIC_API_KEY="secret-anthropic",
@@ -403,15 +520,11 @@ class ExecutorReliabilityTests(unittest.TestCase):
                     self.assertEqual(result.status, ExecutionStatus.COMPLETED)
                     self.assertEqual(result.exit_code, 0)
                     self.assertEqual(result.task_id, "task-1")
-                    expected_outputs = (
-                        {ExecutorOutput.FINAL_TEXT, ExecutorOutput.ARTIFACT_FILES}
-                        if name == "codex"
-                        else {ExecutorOutput.ARTIFACT_FILES}
-                    )
+                    expected_outputs = {ExecutorOutput.FINAL_TEXT, ExecutorOutput.ARTIFACT_FILES}
                     self.assertEqual(result.available_outputs, frozenset(expected_outputs))
                     self.assertIsNone(result.failure)
                     self.assertTrue((request.executor_dir / "prompt.txt").is_file())
-                    self.assertIn("\ufffd", (request.executor_dir / "stdout.log").read_text(encoding="utf-8"))
+                    self.assertNotIn("\ufffd", (request.executor_dir / "stdout.log").read_text(encoding="utf-8"))
                     self.assertIn("\ufffd", (request.executor_dir / "stderr.log").read_text(encoding="utf-8"))
                     captured = json.loads(capture.read_text(encoding="utf-8"))
                     if name == "codex":
@@ -422,7 +535,7 @@ class ExecutorReliabilityTests(unittest.TestCase):
                         self.assertNotIn("CURSOR_API_KEY", captured)
                     self.assertEqual(captured["KEEP_ME"], "retained")
                     if name == "codex":
-                        self.assertEqual(result.output_text, "final response \ufffd\n")
+                        self.assertEqual(result.output_text, "final response\n")
                         self.assertEqual(result.metadata["forced_login_method"], "chatgpt")
                     if name == "cursor":
                         self.assertTrue(result.metadata["reference_integrity_verified"])
@@ -445,13 +558,9 @@ class ExecutorReliabilityTests(unittest.TestCase):
                     result = executor.execute(
                         _execution_request(no_output_root, _local_environment(GDPVAL_FAKE_MODE="no-deliverable"))
                     )
-                    expected_status = ExecutionStatus.COMPLETED if name == "codex" else ExecutionStatus.NO_DELIVERABLE
+                    expected_status = ExecutionStatus.COMPLETED
                     self.assertEqual(result.status, expected_status)
-                    expected_outputs = (
-                        {ExecutorOutput.FINAL_TEXT, ExecutorOutput.ARTIFACT_FILES}
-                        if name == "codex"
-                        else {ExecutorOutput.ARTIFACT_FILES}
-                    )
+                    expected_outputs = {ExecutorOutput.FINAL_TEXT, ExecutorOutput.ARTIFACT_FILES}
                     self.assertEqual(result.available_outputs, frozenset(expected_outputs))
                     self.assertIsNone(result.failure)
                     failed_root = root / f"{name}-failed"

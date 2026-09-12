@@ -79,6 +79,7 @@ from eval_harness.interventions.base import (
     file_evidence,
 )
 from eval_harness.provenance import canonical_json_sha256
+from eval_harness.reasoning import ReasoningEffortOption
 from eval_harness.runner import RunSummary
 
 
@@ -190,13 +191,17 @@ class _Evaluator(Evaluator):
 
 class _Executor(Executor):
     name = "executor-a"
+    runtime = "test"
     invocation_mode = "deterministic"
+    network_access_enabled: bool = False
+    reasoning_effort: ReasoningEffortOption = None
 
     def preflight(self) -> PreflightResult:
         return PreflightResult(self.name, True, version="1", auth_mode="local")
 
     def execute(self, request: ExecutionRequest) -> ExecutionResult:
         return ExecutionResult(
+            runtime="test",
             task_id=request.task.task_id,
             executor=self.name,
             executor_version="1",
@@ -1429,6 +1434,7 @@ class InterventionBoundaryTests(unittest.TestCase):
             runtime_root.mkdir()
             request = BuildRequest("run", task.execution, (bundle,), runtime_root, artifact_root)
             execution = ExecutionResult(
+                runtime="test",
                 task_id=task.execution.task_id,
                 executor=builder.name,
                 executor_version="1",

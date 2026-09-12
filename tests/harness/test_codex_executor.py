@@ -65,7 +65,7 @@ class CodexExecutorTests(unittest.TestCase):
         self.assertNotIn("CODEX_ACCESS_TOKEN", env)
         self.assertEqual(env["KEEP_ME"], "yes")
 
-    def test_execute_collects_final_message_as_output_text_with_replacement_decoding(self) -> None:
+    def test_execute_collects_authoritative_final_message_after_valid_jsonl(self) -> None:
         with tempfile.TemporaryDirectory() as root:
             base = Path(root)
             request = ExecutionRequest(
@@ -81,14 +81,26 @@ class CodexExecutorTests(unittest.TestCase):
                 del kwargs
                 output_path = Path(command[command.index("--output-last-message") + 1])
                 output_path.parent.mkdir(parents=True, exist_ok=True)
-                output_path.write_bytes(b"final \\boxed{42} \xff\n")
-                return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+                output_path.write_text("final \\boxed{42}\n", encoding="utf-8")
+                stdout = (
+                    '{"type":"thread.started","thread_id":"thread"}\n'
+                    '{"type":"turn.started"}\n'
+                    '{"type":"item.completed","item":{"id":"item","type":"agent_message",'
+                    '"text":"intermediate"}}\n'
+                    '{"type":"turn.completed","usage":{"input_tokens":0,"cached_input_tokens":0,'
+                    '"output_tokens":0,"reasoning_output_tokens":0}}\n'
+                )
+                return subprocess.CompletedProcess(command, 0, stdout=stdout, stderr="")
 
             with patch("eval_harness.executors.codex.subprocess.run", side_effect=fake_run):
                 result = executor.execute(request)
 
-            self.assertEqual(result.output_text, "final \\boxed{42} \ufffd\n")
+            self.assertEqual(result.output_text, "final \\boxed{42}\n")
             self.assertEqual(result.metadata["output_text_source"], "executor/final-message.txt")
+            self.assertEqual(result.runtime, "host-subprocess")
+            self.assertIsNone(result.model_id)
+            self.assertIsNone(result.effective_reasoning_effort)
+            self.assertFalse(result.effective_reasoning_effort_available)
 
 
 if __name__ == "__main__":

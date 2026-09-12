@@ -80,6 +80,7 @@ class BuilderContractTests(unittest.TestCase):
         status: ExecutionStatus = ExecutionStatus.COMPLETED,
     ) -> ExecutionResult:
         return ExecutionResult(
+            runtime="test",
             task_id=task_id,
             executor="fake",
             executor_version=None,

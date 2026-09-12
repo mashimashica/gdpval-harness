@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import subprocess
 import tempfile
@@ -131,12 +132,25 @@ class ExecutorAdapterFailureTests(unittest.TestCase):
 
             def fake_run(command: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
                 captured.update(kwargs)
-                return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+                final_path = Path(command[command.index("--output-last-message") + 1])
+                final_path.parent.mkdir(parents=True, exist_ok=True)
+                final_path.write_text("", encoding="utf-8")
+                stdout = (
+                    '{"type":"thread.started","thread_id":"thread"}\n'
+                    '{"type":"turn.started"}\n'
+                    '{"type":"turn.completed","usage":{"input_tokens":0,"cached_input_tokens":0,'
+                    '"output_tokens":0,"reasoning_output_tokens":0}}\n'
+                )
+                return subprocess.CompletedProcess(command, 0, stdout=stdout, stderr="")
 
             executor._version = "fake"
             with patch("eval_harness.executors.codex.subprocess.run", side_effect=fake_run):
                 result = executor.execute(request)
-            self.assertEqual(result.status, ExecutionStatus.NO_DELIVERABLE)
+            self.assertEqual(result.status, ExecutionStatus.COMPLETED)
+            self.assertEqual(
+                result.available_outputs,
+                frozenset({ExecutorOutput.FINAL_TEXT, ExecutorOutput.ARTIFACT_FILES}),
+            )
             self.assertEqual(captured["errors"], "replace")
             environment = captured["env"]
             assert isinstance(environment, dict)
@@ -144,6 +158,10 @@ class ExecutorAdapterFailureTests(unittest.TestCase):
             self.assertEqual(environment["KEEP"], "yes")
             self.assertEqual(result.metadata["reasoning_effort_requested"], "high")
             self.assertFalse(result.metadata["cloud_execution"])
+            self.assertEqual(result.runtime, "host-subprocess")
+            self.assertEqual(result.model_id, "reasoning-model")
+            self.assertIsNone(result.effective_reasoning_effort)
+            self.assertFalse(result.effective_reasoning_effort_available)
 
     def test_claude_preflight_status_probe_errors_have_no_implicit_fallback(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -153,7 +171,7 @@ class ExecutorAdapterFailureTests(unittest.TestCase):
             with patch(
                 "eval_harness.executors.claude_code.subprocess.run",
                 side_effect=[
-                    subprocess.CompletedProcess([], 0, stdout="claude fake", stderr=""),
+                    subprocess.CompletedProcess([], 0, stdout="Claude Code 2.1.259", stderr=""),
                     subprocess.TimeoutExpired(["claude", "auth", "status"], 15),
                 ],
             ):
@@ -164,7 +182,7 @@ class ExecutorAdapterFailureTests(unittest.TestCase):
             with patch(
                 "eval_harness.executors.claude_code.subprocess.run",
                 side_effect=[
-                    subprocess.CompletedProcess([], 0, stdout="claude fake", stderr=""),
+                    subprocess.CompletedProcess([], 0, stdout="Claude Code 2.1.259", stderr=""),
                     subprocess.CompletedProcess([], 1, stdout="", stderr=""),
                 ],
             ):
@@ -193,16 +211,32 @@ class ExecutorAdapterFailureTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             executor = CursorExecutor(command="agent")
-            executor._version = "agent fake"
+            executor._version = "2026.09.10-fd3934a"
             request = _execution_request(root)
 
             with patch(
                 "eval_harness.executors.cursor.subprocess.run",
-                return_value=subprocess.CompletedProcess([], 0, stdout="out", stderr="err"),
+                return_value=subprocess.CompletedProcess(
+                    [],
+                    0,
+                    stdout=(
+                        '{"type":"result","subtype":"success","is_error":false,'
+                        '"duration_ms":1,"duration_api_ms":1,"result":"answer",'
+                        '"session_id":"session"}'
+                    ),
+                    stderr="err",
+                ),
             ) as run:
                 no_deliverable = executor.execute(request)
-            self.assertEqual(no_deliverable.status, ExecutionStatus.NO_DELIVERABLE)
-            self.assertEqual(no_deliverable.available_outputs, frozenset({ExecutorOutput.ARTIFACT_FILES}))
+            self.assertEqual(no_deliverable.status, ExecutionStatus.COMPLETED)
+            self.assertEqual(
+                no_deliverable.available_outputs,
+                frozenset({ExecutorOutput.FINAL_TEXT, ExecutorOutput.ARTIFACT_FILES}),
+            )
+            self.assertEqual(no_deliverable.runtime, "host-subprocess")
+            self.assertEqual(no_deliverable.model_id, "test-model")
+            self.assertIsNone(no_deliverable.effective_reasoning_effort)
+            self.assertFalse(no_deliverable.effective_reasoning_effort_available)
             self.assertEqual(run.call_args.kwargs["errors"], "replace")
 
             references = request.workspace / "reference_files"
@@ -220,6 +254,32 @@ class ExecutorAdapterFailureTests(unittest.TestCase):
             self.assertTrue(references.is_dir())
             self.assertEqual((references / "source.txt").read_text(encoding="utf-8"), "source")
 
+    def test_exit_zero_with_malformed_structured_output_is_a_run_protocol_failure(self) -> None:
+        cases: tuple[tuple[str, object, str], ...] = (
+            ("codex", CodexExecutor(command="codex"), ""),
+            ("claude", ClaudeCodeExecutor(command="claude"), "plain output"),
+            ("cursor", CursorExecutor(command="agent"), "plain output"),
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            for name, executor, stdout in cases:
+                with self.subTest(executor=name):
+                    assert isinstance(executor, (CodexExecutor, ClaudeCodeExecutor, CursorExecutor))
+                    executor._version = "test-version"
+                    request = _execution_request(root / name)
+                    with patch(
+                        f"eval_harness.executors.{name if name != 'claude' else 'claude_code'}.subprocess.run",
+                        return_value=subprocess.CompletedProcess([], 0, stdout=stdout, stderr=""),
+                    ):
+                        result = executor.execute(request)
+                    self.assertEqual(result.status, ExecutionStatus.FAILED)
+                    self.assertEqual(result.available_outputs, frozenset())
+                    self.assertIsNone(result.output_text)
+                    self.assertEqual(
+                        result.failure, Failure(FailureKind.PROTOCOL, "output_protocol", FailureImpact.RUN)
+                    )
+                    self.assertIn("protocol_error", result.metadata)
+
     def test_executor_registries_construct_only_supported_local_adapters(self) -> None:
         codex = create_executor("codex", reasoning_effort="high")
         claude = create_executor("claude-code", claude_max_turns=3)
@@ -229,7 +289,7 @@ class ExecutorAdapterFailureTests(unittest.TestCase):
         assert isinstance(claude, ClaudeCodeExecutor)
         self.assertEqual(claude.max_turns, 3)
         assert isinstance(cursor, CursorExecutor)
-        self.assertTrue(cursor.network_enabled)
+        self.assertTrue(cursor.network_access_enabled)
         with self.assertRaisesRegex(ValueError, "not available"):
             create_executor("stirrup")
         with self.assertRaisesRegex(ValueError, "unknown executor"):
@@ -247,7 +307,7 @@ class ExecutorAdapterFailureTests(unittest.TestCase):
                 root,
                 "codex",
                 """
-                if [ "$1" = "--version" ]; then echo 'codex 9'; exit 0; fi
+                if [ "$1" = "--version" ]; then echo 'codex 0.154.0'; exit 0; fi
                 if [ "$1" = "login" ]; then
                     printf '%s\n' "${FAKE_AUTH:-chatgpt}"
                     exit "${FAKE_EXIT:-0}"
@@ -269,7 +329,7 @@ class ExecutorAdapterFailureTests(unittest.TestCase):
             with patch.dict(os.environ, {"FAKE_AUTH": "logout", "FAKE_EXIT": "9"}, clear=False):
                 failed = executor.preflight()
             self.assertFalse(failed.ok)
-            self.assertEqual(failed.details, ("logout",))
+            self.assertEqual(failed.details, ("Codex is not logged in",))
 
     def test_codex_version_and_execution_persist_failure_states(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -285,7 +345,7 @@ class ExecutorAdapterFailureTests(unittest.TestCase):
                 root,
                 "codex-run",
                 """
-                if [ "$1" = "--version" ]; then echo 'codex fake'; exit 0; fi
+                if [ "$1" = "--version" ]; then echo 'codex 0.154.0'; exit 0; fi
                 if [ "$1" = "exec" ]; then
                     output=''
                     while [ "$#" -gt 0 ]; do
@@ -296,12 +356,17 @@ class ExecutorAdapterFailureTests(unittest.TestCase):
                         success)
                             mkdir -p deliverables
                             printf 'artifact\n' > deliverables/result.txt
-                            printf 'final \377\n' > "$output"
+                            printf 'final response\n' > "$output"
                             ;;
                         no-deliverable) printf 'no artifact\n' > "$output" ;;
                         empty-final) : > "$output" ;;
                         nonzero) printf 'failure\n' >&2; exit 7 ;;
                     esac
+                    printf '%s\n' \
+                        '{"type":"thread.started","thread_id":"thread"}' \
+                        '{"type":"turn.started"}' \
+                        '{"type":"item.completed","item":{"id":"item","type":"agent_message","text":"intermediate"}}' \
+                        '{"type":"turn.completed","usage":{"input_tokens":0,"cached_input_tokens":0,"output_tokens":0,"reasoning_output_tokens":0}}'
                 fi
                 """,
             )
@@ -309,7 +374,7 @@ class ExecutorAdapterFailureTests(unittest.TestCase):
             executor._version = "codex fake"
             completed = executor.execute(_execution_request(root, {"FAKE_MODE": "success"}))
             self.assertEqual(completed.status, ExecutionStatus.COMPLETED)
-            self.assertEqual(completed.output_text, "final ÿ\n")
+            self.assertEqual(completed.output_text, "final response\n")
             self.assertEqual(completed.exit_code, 0)
             self.assertEqual(
                 completed.available_outputs,
@@ -325,6 +390,10 @@ class ExecutorAdapterFailureTests(unittest.TestCase):
                 no_deliverable.available_outputs,
                 frozenset({ExecutorOutput.FINAL_TEXT, ExecutorOutput.ARTIFACT_FILES}),
             )
+            self.assertEqual(no_deliverable.runtime, "host-subprocess")
+            self.assertEqual(no_deliverable.model_id, "test-model")
+            self.assertIsNone(no_deliverable.effective_reasoning_effort)
+            self.assertFalse(no_deliverable.effective_reasoning_effort_available)
             self.assertEqual(no_deliverable.output_text, "no artifact\n")
             empty_final = executor.execute(_execution_request(root / "empty-final", {"FAKE_MODE": "empty-final"}))
             self.assertEqual(empty_final.status, ExecutionStatus.COMPLETED)
@@ -373,7 +442,7 @@ class ExecutorAdapterFailureTests(unittest.TestCase):
                 root,
                 "claude",
                 """
-                if [ "$1" = "--version" ]; then echo 'claude fake'; exit 0; fi
+                if [ "$1" = "--version" ]; then echo 'Claude Code 2.1.259'; exit 0; fi
                 if [ "$1" = "auth" ]; then
                     if [ "${FAKE_AUTH:-valid}" = "invalid" ]; then echo 'not json'; exit 0; fi
                     if [ "${FAKE_AUTH:-valid}" = "api" ]; then echo '{\"loggedIn\":true,\"authMethod\":\"api\",\"apiProvider\":\"console\",\"subscriptionType\":\"\"}'; exit 0; fi
@@ -398,7 +467,7 @@ class ExecutorAdapterFailureTests(unittest.TestCase):
             with patch.dict(os.environ, {"FAKE_AUTH": "failed"}, clear=False):
                 failed = executor.preflight()
             self.assertFalse(failed.ok)
-            self.assertEqual(failed.details, ("logged out",))
+            self.assertEqual(failed.details, ("Claude Code is not logged in",))
 
     def test_claude_execution_covers_no_deliverable_nonzero_timeout_and_oserror(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -407,24 +476,35 @@ class ExecutorAdapterFailureTests(unittest.TestCase):
                 root,
                 "claude-run",
                 """
-                if [ "$1" = "--version" ]; then echo 'claude fake'; exit 0; fi
+                if [ "$1" = "--version" ]; then echo 'Claude Code 2.1.259'; exit 0; fi
                 if [ "$1" = "-p" ]; then
                     case "${FAKE_MODE:-no-deliverable}" in
                         success) mkdir -p deliverables; printf 'artifact\n' > deliverables/result.txt ;;
-                        no-deliverable) printf 'stdout\n' ;;
+                        no-deliverable) : ;;
                         nonzero) printf 'bad\n' >&2; exit 8 ;;
                     esac
+                    printf '%s\n' '{"type":"result","subtype":"success","is_error":false,"duration_ms":1,"duration_api_ms":1,"num_turns":1,"result":"answer","session_id":"session"}'
                 fi
                 """,
             )
             executor = ClaudeCodeExecutor(command=str(command))
-            executor._version = "claude fake"
+            executor._version = "Claude Code 2.1.259"
             no_deliverable = executor.execute(_execution_request(root, {"FAKE_MODE": "no-deliverable"}))
-            self.assertEqual(no_deliverable.status, ExecutionStatus.NO_DELIVERABLE)
-            self.assertEqual(no_deliverable.available_outputs, frozenset({ExecutorOutput.ARTIFACT_FILES}))
+            self.assertEqual(no_deliverable.status, ExecutionStatus.COMPLETED)
+            self.assertEqual(
+                no_deliverable.available_outputs,
+                frozenset({ExecutorOutput.FINAL_TEXT, ExecutorOutput.ARTIFACT_FILES}),
+            )
+            self.assertEqual(no_deliverable.runtime, "host-subprocess")
+            self.assertEqual(no_deliverable.model_id, "test-model")
+            self.assertIsNone(no_deliverable.effective_reasoning_effort)
+            self.assertFalse(no_deliverable.effective_reasoning_effort_available)
             completed = executor.execute(_execution_request(root, {"FAKE_MODE": "success"}))
             self.assertEqual(completed.status, ExecutionStatus.COMPLETED)
-            self.assertEqual(completed.available_outputs, frozenset({ExecutorOutput.ARTIFACT_FILES}))
+            self.assertEqual(
+                completed.available_outputs,
+                frozenset({ExecutorOutput.FINAL_TEXT, ExecutorOutput.ARTIFACT_FILES}),
+            )
             failed = executor.execute(_execution_request(root, {"FAKE_MODE": "nonzero"}))
             self.assertEqual(failed.status, ExecutionStatus.FAILED)
             self.assertEqual(failed.exit_code, 8)
@@ -462,30 +542,123 @@ class ExecutorAdapterFailureTests(unittest.TestCase):
                 root,
                 "agent",
                 """
-                if [ "$1" = "--version" ]; then echo 'agent fake'; exit 0; fi
+                if [ "$1" = "--version" ]; then echo '2026.09.10-fd3934a'; exit 0; fi
                 if [ "$1" = "status" ]; then
                     case "${FAKE_AUTH:-account}" in
-                        account) echo 'Authenticated account';;
-                        api) echo 'API key configured';;
-                        negative) echo 'Not authenticated'; exit 1;;
+                        account) echo '{"status":"authenticated","isAuthenticated":true,"hasAccessToken":true,"hasRefreshToken":true,"userInfo":{"email":"fake@example.invalid"}}';;
+                        api) echo '{"status":"authenticated","isAuthenticated":true,"hasAccessToken":true,"hasRefreshToken":true,"message":"Logged in (unable to fetch user details)"}';;
+                        negative) echo '{"status":"unauthenticated","isAuthenticated":false,"hasAccessToken":false,"hasRefreshToken":false}';;
                         empty) exit 0;;
                     esac
                 fi
                 """,
             )
             executor = CursorExecutor(command=str(command))
-            for mode, expected_mode in (("api", "api"), ("empty", "unknown")):
-                with patch.dict(os.environ, {"FAKE_AUTH": mode}, clear=False):
+            auth_store = root / "config" / "cursor" / "auth.json"
+            auth_store.parent.mkdir(parents=True)
+            auth_store.write_text(
+                json.dumps({"accessToken": "access-fixture", "refreshToken": "refresh-fixture"}),
+                encoding="utf-8",
+            )
+            for mode, expected_mode in (("api", "unknown"), ("empty", "unknown")):
+                with patch.dict(
+                    os.environ,
+                    {"FAKE_AUTH": mode, "XDG_CONFIG_HOME": str(root / "config")},
+                    clear=False,
+                ):
                     result = executor.preflight()
                 self.assertFalse(result.ok)
                 self.assertEqual(result.auth_mode, expected_mode)
-            with patch.dict(os.environ, {"FAKE_AUTH": "negative"}, clear=False):
+            with patch.dict(
+                os.environ,
+                {"FAKE_AUTH": "negative", "XDG_CONFIG_HOME": str(root / "config")},
+                clear=False,
+            ):
                 negative = executor.preflight()
             self.assertFalse(negative.ok)
-            with patch.dict(os.environ, {"FAKE_AUTH": "account"}, clear=False):
+            with patch.dict(
+                os.environ,
+                {"FAKE_AUTH": "account", "XDG_CONFIG_HOME": str(root / "config")},
+                clear=False,
+            ):
                 account = executor.preflight()
             self.assertTrue(account.ok)
             self.assertEqual(account.auth_mode, "cursor-account")
+
+    def test_cursor_preflight_rejects_non_account_auth_store_without_secret_diagnostics(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            command = _write_command(
+                root,
+                "agent-auth-store",
+                """
+                if [ "$1" = "--version" ]; then echo '2026.09.10-fd3934a'; exit 0; fi
+                if [ "$1" = "status" ]; then
+                    echo '{"status":"authenticated","isAuthenticated":true,"hasAccessToken":true,"hasRefreshToken":true,"userInfo":{"email":"fake@example.invalid"}}'
+                fi
+                """,
+            )
+            store = root / "config" / "cursor" / "auth.json"
+            store.parent.mkdir(parents=True)
+            executor = CursorExecutor(command=str(command))
+            with patch.dict(os.environ, {"XDG_CONFIG_HOME": str(root / "config")}, clear=False):
+                missing = executor.preflight()
+            self.assertFalse(missing.ok)
+            self.assertIn("unavailable", missing.details[0])
+            cases: tuple[tuple[dict[str, object], str], ...] = (
+                ({"accessToken": "access-fixture", "refreshToken": "refresh-fixture", "apiKey": "api"}, "API-key"),
+                ({"accessToken": "access-fixture", "refreshToken": "refresh-fixture", "apiKey": {}}, "API-key"),
+                ({"accessToken": "access-fixture", "refreshToken": "refresh-fixture", "apiKey": []}, "API-key"),
+                (
+                    {
+                        "accessToken": "access-fixture",
+                        "refreshToken": "refresh-fixture",
+                        "bedrockCredentials": {"region": "fixture"},
+                    },
+                    "Bedrock",
+                ),
+                (
+                    {"accessToken": "access-fixture", "refreshToken": "refresh-fixture", "bedrockCredentials": {}},
+                    "Bedrock",
+                ),
+                (
+                    {"accessToken": "access-fixture", "refreshToken": "refresh-fixture", "bedrockCredentials": []},
+                    "Bedrock",
+                ),
+                ({"accessToken": "access-fixture"}, "both required"),
+                ({"accessToken": "same", "refreshToken": "same"}, "equal"),
+            )
+            for payload, expected_detail in cases:
+                with self.subTest(expected_detail=expected_detail):
+                    store.write_text(json.dumps(payload), encoding="utf-8")
+                    with patch.dict(os.environ, {"XDG_CONFIG_HOME": str(root / "config")}, clear=False):
+                        result = executor.preflight()
+                    self.assertFalse(result.ok)
+                    self.assertEqual(result.auth_mode, "unknown")
+                    detail = result.details[0]
+                    self.assertIn(expected_detail, detail)
+                    self.assertNotIn("access-fixture", detail)
+                    self.assertNotIn("refresh-fixture", detail)
+
+            store.write_text("not-json", encoding="utf-8")
+            with patch.dict(os.environ, {"XDG_CONFIG_HOME": str(root / "config")}, clear=False):
+                malformed = executor.preflight()
+            self.assertFalse(malformed.ok)
+            self.assertNotIn("not-json", repr(malformed))
+
+            fallback_home = root / "home"
+            fallback_store = fallback_home / ".config" / "cursor" / "auth.json"
+            fallback_store.parent.mkdir(parents=True)
+            fallback_store.write_text(
+                json.dumps({"accessToken": "fallback-access", "refreshToken": "fallback-refresh"}),
+                encoding="utf-8",
+            )
+            with (
+                patch.dict(os.environ, {"XDG_CONFIG_HOME": ""}, clear=False),
+                patch("eval_harness.executors.cursor.Path.home", return_value=fallback_home),
+            ):
+                fallback = executor.preflight()
+            self.assertTrue(fallback.ok)
 
     def test_cursor_execution_restores_references_and_fails_on_mutation_or_timeout(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -494,18 +667,19 @@ class ExecutorAdapterFailureTests(unittest.TestCase):
                 root,
                 "agent-run",
                 """
-                if [ "$1" = "--version" ]; then echo 'agent fake'; exit 0; fi
+                if [ "$1" = "--version" ]; then echo '2026.09.10-fd3934a'; exit 0; fi
                 if [ "$1" = "-p" ]; then
                     case "${FAKE_MODE:-success}" in
                         success) mkdir -p deliverables; printf 'artifact\n' > deliverables/result.txt ;;
                         mutate) printf 'tampered\n' > reference_files/input.txt ;;
                         nonzero) printf 'failed\n' >&2; exit 9 ;;
                     esac
+                    printf '%s\n' '{"type":"result","subtype":"success","is_error":false,"duration_ms":1,"duration_api_ms":1,"result":"answer","session_id":"session"}'
                 fi
                 """,
             )
             executor = CursorExecutor(command=str(command))
-            executor._version = "agent fake"
+            executor._version = "2026.09.10-fd3934a"
             request = _execution_request(root, {"FAKE_MODE": "success"})
             (request.workspace / "reference_files").mkdir(parents=True)
             (request.workspace / "reference_files" / "input.txt").write_text("source\n", encoding="utf-8")

@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import subprocess
 from datetime import datetime, timezone
@@ -18,7 +19,9 @@ from eval_harness.executors.base import (
     Executor,
     PreflightResult,
 )
+from eval_harness.executors.output_protocol import OutputProtocolError, parse_claude_output, parse_strict_json_object
 from eval_harness.failures import Failure, FailureImpact, FailureKind
+from eval_harness.reasoning import ReasoningEffortOption
 
 
 _API_AND_CLOUD_ENV_VARS = {
@@ -34,6 +37,9 @@ _API_AND_CLOUD_ENV_VARS = {
     "CLAUDE_CODE_USE_FOUNDRY",
 }
 _SUBSCRIPTION_TYPES = {"pro", "max", "team", "enterprise"}
+_COMMAND_ENV = "EVAL_CLAUDE_COMMAND"
+_SUPPORTED_VERSION = "2.1.259"
+_VERSION_PATTERN = re.compile(r"(?<![A-Za-z0-9])2\.1\.259(?![A-Za-z0-9-])")
 
 
 def _utc_now() -> str:
@@ -53,13 +59,19 @@ def subscription_environment(base: Mapping[str, str] | None = None) -> dict[str,
     return env
 
 
+def _version_is_supported(version: str | None) -> bool:
+    return version is not None and _VERSION_PATTERN.search(version) is not None
+
+
 class ClaudeCodeExecutor(Executor):
     name = "claude-code"
+    runtime = "host-subprocess"
     invocation_mode = "claude -p"
     tool_permission_mode = "acceptEdits + restricted built-in tools + fail-closed Bash sandbox"
+    reasoning_effort: ReasoningEffortOption = None
     capabilities = ExecutorCapabilities(
         inputs=frozenset({ExecutorInput.PROMPT_TEXT, ExecutorInput.WORKSPACE_FILES}),
-        outputs=frozenset({ExecutorOutput.ARTIFACT_FILES}),
+        outputs=frozenset({ExecutorOutput.FINAL_TEXT, ExecutorOutput.ARTIFACT_FILES}),
     )
 
     def __init__(
@@ -69,9 +81,11 @@ class ClaudeCodeExecutor(Executor):
         max_turns: int = 250,
         command: str | None = None,
     ) -> None:
-        self.network_enabled = network_enabled
+        if type(network_enabled) is not bool:
+            raise TypeError("network_enabled must be a bool")
+        self.network_access_enabled = network_enabled
         self.max_turns = max_turns
-        resolved_command = command or os.getenv("GDPVAL_CLAUDE_COMMAND", "claude")
+        resolved_command = command or os.getenv(_COMMAND_ENV, "claude")
         if resolved_command is None:
             raise RuntimeError("Claude Code command could not be resolved")
         self.command = resolved_command
@@ -101,6 +115,13 @@ class ClaudeCodeExecutor(Executor):
             )
 
         version = self.version()
+        if not _version_is_supported(version):
+            return PreflightResult(
+                executor=self.name,
+                ok=False,
+                version=version,
+                details=(f"Claude Code version must be exactly {_SUPPORTED_VERSION}",),
+            )
         try:
             status = subprocess.run(
                 [self.command, "auth", "status"],
@@ -125,11 +146,11 @@ class ClaudeCodeExecutor(Executor):
                 executor=self.name,
                 ok=False,
                 version=version,
-                details=(raw or "Claude Code is not logged in",),
+                details=("Claude Code is not logged in",),
             )
         try:
-            payload = json.loads(raw)
-        except json.JSONDecodeError:
+            payload = parse_strict_json_object(raw)
+        except OutputProtocolError:
             return PreflightResult(
                 executor=self.name,
                 ok=False,
@@ -138,10 +159,27 @@ class ClaudeCodeExecutor(Executor):
                 details=("claude auth status did not return JSON; refusing subscription-mode execution",),
             )
 
-        logged_in = payload.get("loggedIn") is True
-        auth_method = str(payload.get("authMethod") or "").lower()
-        api_provider = str(payload.get("apiProvider") or "").lower()
-        subscription_type = str(payload.get("subscriptionType") or "").lower()
+        logged_in_value = payload.get("loggedIn")
+        auth_method_value = payload.get("authMethod")
+        api_provider_value = payload.get("apiProvider")
+        subscription_value = payload.get("subscriptionType")
+        if (
+            type(logged_in_value) is not bool
+            or not isinstance(auth_method_value, str)
+            or not isinstance(api_provider_value, str)
+            or not isinstance(subscription_value, str)
+        ):
+            return PreflightResult(
+                executor=self.name,
+                ok=False,
+                version=version,
+                auth_mode="unknown",
+                details=("claude auth status has an invalid shape; refusing subscription-mode execution",),
+            )
+        logged_in = logged_in_value
+        auth_method = auth_method_value.lower()
+        api_provider = api_provider_value.lower()
+        subscription_type = subscription_value.lower()
         if (
             not logged_in
             or auth_method != "claude.ai"
@@ -173,7 +211,7 @@ class ClaudeCodeExecutor(Executor):
             "allowUnsandboxedCommands": False,
             "autoAllowBashIfSandboxed": True,
         }
-        if not self.network_enabled:
+        if not self.network_access_enabled:
             sandbox["network"] = {"strictAllowlist": True, "allowedDomains": []}
         return json.dumps({"sandbox": sandbox}, separators=(",", ":"))
 
@@ -181,7 +219,6 @@ class ClaudeCodeExecutor(Executor):
         command = [
             self.command,
             "-p",
-            "Complete the GDPval task supplied on standard input. Follow its deliverables contract exactly.",
             "--output-format",
             "json",
             "--no-session-persistence",
@@ -196,7 +233,7 @@ class ClaudeCodeExecutor(Executor):
             "--max-turns",
             str(self.max_turns),
         ]
-        if not self.network_enabled:
+        if not self.network_access_enabled:
             command.extend(["--disallowedTools", "WebFetch", "WebSearch", "mcp__*"])
         if request.model:
             command.extend(["--model", request.model])
@@ -216,6 +253,8 @@ class ClaudeCodeExecutor(Executor):
         stdout = ""
         stderr = ""
         has_deliverable = False
+        output_text: str | None = None
+        protocol_error: str | None = None
         failure: Failure | None = None
 
         try:
@@ -231,11 +270,24 @@ class ClaudeCodeExecutor(Executor):
                 check=False,
             )
             exit_code = completed.returncode
-            stdout = completed.stdout or ""
-            stderr = completed.stderr or ""
+            stdout = _text(completed.stdout)
+            stderr = _text(completed.stderr)
             if exit_code == 0:
-                has_deliverable = any(path.is_file() for path in request.deliverables_dir.rglob("*"))
-                status = ExecutionStatus.COMPLETED if has_deliverable else ExecutionStatus.NO_DELIVERABLE
+                try:
+                    parsed = parse_claude_output(stdout)
+                except OutputProtocolError as exc:
+                    failure = Failure(FailureKind.PROTOCOL, "output_protocol", FailureImpact.RUN)
+                    protocol_error = exc.code.value
+                else:
+                    output_text = parsed.output_text
+                    has_deliverable = request.deliverables_dir.is_dir() and any(
+                        path.is_file() for path in request.deliverables_dir.rglob("*")
+                    )
+                    status = (
+                        ExecutionStatus.COMPLETED
+                        if output_text is not None or has_deliverable
+                        else ExecutionStatus.NO_DELIVERABLE
+                    )
             else:
                 failure = Failure(FailureKind.PROCESS, "process_exit", FailureImpact.RUN)
         except subprocess.TimeoutExpired as exc:
@@ -254,6 +306,19 @@ class ClaudeCodeExecutor(Executor):
             stdout_path.write_text(stdout, encoding="utf-8")
             stderr_path.write_text(stderr, encoding="utf-8")
 
+        metadata: dict[str, object] = {
+            "safe_mode": True,
+            "sandbox": "enabled-fail-closed",
+            "tool_permission_mode": self.tool_permission_mode,
+            "network_policy": "runtime-managed" if self.network_access_enabled else "strict-empty-allowlist",
+            "cloud_execution": False,
+            "max_turns": self.max_turns,
+            "structured_output": "json",
+            "session_persistence": "disabled",
+            "api_environment_removed": sorted(_API_AND_CLOUD_ENV_VARS),
+        }
+        if protocol_error is not None:
+            metadata["protocol_error"] = protocol_error
         return ExecutionResult(
             task_id=request.task.task_id,
             executor=self.name,
@@ -266,17 +331,23 @@ class ClaudeCodeExecutor(Executor):
             started_at=started_at,
             finished_at=_utc_now(),
             exit_code=exit_code,
-            available_outputs=frozenset({ExecutorOutput.ARTIFACT_FILES}) if failure is None else frozenset(),
+            available_outputs=(
+                frozenset(
+                    output
+                    for output, present in (
+                        (ExecutorOutput.FINAL_TEXT, output_text is not None),
+                        (ExecutorOutput.ARTIFACT_FILES, True),
+                    )
+                    if present
+                )
+                if failure is None
+                else frozenset()
+            ),
             failure=failure,
-            metadata={
-                "safe_mode": True,
-                "sandbox": "enabled-fail-closed",
-                "tool_permission_mode": self.tool_permission_mode,
-                "network_policy": "runtime-managed" if self.network_enabled else "strict-empty-allowlist",
-                "cloud_execution": False,
-                "max_turns": self.max_turns,
-                "structured_output": "json",
-                "session_persistence": "disabled",
-                "api_environment_removed": sorted(_API_AND_CLOUD_ENV_VARS),
-            },
+            output_text=output_text,
+            metadata=metadata,
+            runtime="host-subprocess",
+            model_id=request.model or None,
+            effective_reasoning_effort=None,
+            effective_reasoning_effort_available=False,
         )
