@@ -28,7 +28,7 @@ import yaml
 from nemo_gym.server_metadata import ServerMetadata, visit_agent_server, visit_resources_server
 
 
-README_PATH = Path("README.md")
+UPSTREAM_ENVIRONMENTS_PATH = Path("UPSTREAM-ENVIRONMENTS.md")
 
 RESOURCES_SERVERS_FOLDER = Path("resources_servers")
 RESPONSES_API_AGENTS_FOLDER = Path("responses_api_agents")
@@ -441,7 +441,7 @@ def format_table(table: list[list[str]]) -> str:  # pragma: no cover
 
 
 def main():  # pragma: no cover
-    text = README_PATH.read_text()
+    text = UPSTREAM_ENVIRONMENTS_PATH.read_text(encoding="utf-8")
 
     training_servers = get_training_server_info()
     training_table_str = generate_training_table(training_servers)
@@ -453,13 +453,13 @@ def main():  # pragma: no cover
 
     if not training_pattern.search(text):
         sys.stderr.write(
-            "Error: README.md does not contain <!-- START_TRAINING_SERVERS_TABLE --> and <!-- END_TRAINING_SERVERS_TABLE --> markers.\n"
+            "Error: UPSTREAM-ENVIRONMENTS.md does not contain <!-- START_TRAINING_SERVERS_TABLE --> and <!-- END_TRAINING_SERVERS_TABLE --> markers.\n"
         )
         sys.exit(1)
 
     text = training_pattern.sub(lambda m: f"{m.group(1)}\n{training_table_str}\n{m.group(3)}", text)
 
-    README_PATH.write_text(text)
+    UPSTREAM_ENVIRONMENTS_PATH.write_text(text, encoding="utf-8")
 
 
 if __name__ == "__main__":

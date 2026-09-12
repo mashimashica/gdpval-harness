@@ -249,9 +249,7 @@ def parse_verdict(text: str) -> Verdict:
             matches.append(match.group(1).upper())
     final_match = _VERDICT_LINE_RE.fullmatch(nonempty_lines[-1])
     if final_match is None or len(matches) != 1:
-        raise ValueError(
-            "judge output must end with exactly one standalone BOXED[A], BOXED[B], or BOXED[TIE] verdict"
-        )
+        raise ValueError("judge output must end with exactly one standalone BOXED[A], BOXED[B], or BOXED[TIE] verdict")
     return Verdict(final_match.group(1).upper())
 
 

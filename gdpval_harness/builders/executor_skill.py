@@ -16,13 +16,13 @@ from gdpval_harness.builders.artifact import (
     seal_generated_skill,
 )
 from gdpval_harness.builders.base import (
+    Builder,
+    BuilderInputBundle,
+    BuilderPreflightResult,
     BuildFailurePhase,
     BuildRequest,
     BuildResult,
     BuildStatus,
-    Builder,
-    BuilderInputBundle,
-    BuilderPreflightResult,
 )
 from gdpval_harness.builders.inputs import (
     stage_builder_inputs,
@@ -300,9 +300,7 @@ class ExecutorSkillBuilder(Builder):
         if status is ExecutionStatus.FAILED:
             return self._result(request, BuildStatus.FAILED, execution=execution, phase=BuildFailurePhase.EXECUTION)
         if status is ExecutionStatus.TIMED_OUT:
-            return self._result(
-                request, BuildStatus.TIMED_OUT, execution=execution, phase=BuildFailurePhase.EXECUTION
-            )
+            return self._result(request, BuildStatus.TIMED_OUT, execution=execution, phase=BuildFailurePhase.EXECUTION)
         if status is ExecutionStatus.INTERRUPTED:
             return self._result(
                 request, BuildStatus.INTERRUPTED, execution=execution, phase=BuildFailurePhase.EXECUTION

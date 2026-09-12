@@ -226,14 +226,17 @@ class ExecutorSkillBuilderTests(unittest.TestCase):
                 self.assertEqual(executor.execute_calls, 0)
 
     def test_neutral_runtime_prompt_and_environment_exclude_provenance(self) -> None:
-        with tempfile.TemporaryDirectory() as temporary, patch.dict(
-            "os.environ",
-            {
-                "GDPVAL_CONDITION": "legacy-condition",
-                "GDPVAL_CONDITION_FILE": "legacy-condition-file",
-                "GDPVAL_CONDITION_APPLIED": "legacy-applied",
-                "BUILDER_AMBIENT_SENTINEL": "ambient-value",
-            },
+        with (
+            tempfile.TemporaryDirectory() as temporary,
+            patch.dict(
+                "os.environ",
+                {
+                    "GDPVAL_CONDITION": "legacy-condition",
+                    "GDPVAL_CONDITION_FILE": "legacy-condition-file",
+                    "GDPVAL_CONDITION_APPLIED": "legacy-applied",
+                    "BUILDER_AMBIENT_SENTINEL": "ambient-value",
+                },
+            ),
         ):
             root = Path(temporary)
             executor = DeterministicExecutor()
@@ -517,9 +520,7 @@ class ExecutorSkillBuilderTests(unittest.TestCase):
                     application_executor.last_request.workspace.as_posix(),
                     application_executor.last_request.executor_dir.as_posix(),
                     application_executor.last_request.deliverables_dir.as_posix(),
-                    tuple(
-                        f"{key}={value}" for key, value in application_executor.last_request.environment.items()
-                    ),
+                    tuple(f"{key}={value}" for key, value in application_executor.last_request.environment.items()),
                 )
             )
             self.assertIsNot(result.execution, application_result)

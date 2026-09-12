@@ -83,9 +83,7 @@ def create_executor(
 
 def main() -> None:
     for descriptor in list_executors():
-        print(
-            f"{descriptor.name}\t{descriptor.runtime}\t{descriptor.usage_mode}\t{descriptor.generic_runner_status}"
-        )
+        print(f"{descriptor.name}\t{descriptor.runtime}\t{descriptor.usage_mode}\t{descriptor.generic_runner_status}")
 
 
 if __name__ == "__main__":

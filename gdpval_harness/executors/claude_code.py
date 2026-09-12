@@ -87,7 +87,9 @@ class ClaudeCodeExecutor(Executor):
 
     def preflight(self) -> PreflightResult:
         if shutil.which(self.command) is None and not os.path.isfile(self.command):
-            return PreflightResult(executor=self.name, ok=False, details=(f"Claude command not found: {self.command}",))
+            return PreflightResult(
+                executor=self.name, ok=False, details=(f"Claude command not found: {self.command}",)
+            )
 
         version = self.version()
         try:

@@ -10,8 +10,8 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from gdpval_harness.judges.base import JudgeResult
 import gdpval_harness.local_judge_runner as runner
+from gdpval_harness.judges.base import JudgeResult
 
 
 class _InterruptJudge:

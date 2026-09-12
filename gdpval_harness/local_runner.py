@@ -330,8 +330,7 @@ def _application_evidence(application: InterventionApplication) -> dict[str, obj
             "target": application.application.target,
         },
         "materialized_files": [
-            {"path": item.path, "size": item.size, "sha256": item.sha256}
-            for item in application.materialized_files
+            {"path": item.path, "size": item.size, "sha256": item.sha256} for item in application.materialized_files
         ],
     }
 

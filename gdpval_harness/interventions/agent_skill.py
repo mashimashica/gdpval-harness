@@ -41,9 +41,7 @@ from gdpval_harness.interventions.base import (
 )
 
 
-_SKILL_FRONTMATTER_FIELDS = frozenset(
-    {"name", "description", "license", "compatibility", "metadata", "allowed-tools"}
-)
+_SKILL_FRONTMATTER_FIELDS = frozenset({"name", "description", "license", "compatibility", "metadata", "allowed-tools"})
 _SKILL_NAME_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 _MAX_SKILL_NAME_LENGTH = 64
 _MAX_DESCRIPTION_LENGTH = 1024
@@ -233,8 +231,10 @@ def load_agent_skill_bundle(
 
 def _skill_name_from_manifest(manifest: InterventionManifest) -> str:
     target = manifest.application.target
-    if not isinstance(target, str) or not target.startswith(_SKILL_TARGET_PREFIX) or not target.endswith(
-        _SKILL_TARGET_SUFFIX
+    if (
+        not isinstance(target, str)
+        or not target.startswith(_SKILL_TARGET_PREFIX)
+        or not target.endswith(_SKILL_TARGET_SUFFIX)
     ):
         raise ValueError("Agent Skill manifest has an invalid workspace-reference target")
     name = target[len(_SKILL_TARGET_PREFIX) : -len(_SKILL_TARGET_SUFFIX)]
@@ -468,9 +468,7 @@ class AgentSkillIntervention(Intervention):
         return self._ready_bundle
 
 
-def _source_entries_from_manifest(
-    manifest: InterventionManifest, root: Path
-) -> tuple[tuple[str, bytes], ...]:
+def _source_entries_from_manifest(manifest: InterventionManifest, root: Path) -> tuple[tuple[str, bytes], ...]:
     entries: list[tuple[str, bytes]] = []
     for item in manifest.files:
         path = root / PurePosixPath(item.path)

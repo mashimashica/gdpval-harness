@@ -24,13 +24,13 @@ from typing import Any, Mapping, Sequence
 
 from gdpval_harness.benchmarks.base import Benchmark, BenchmarkTask
 from gdpval_harness.builders.base import (
-    BuildRequest,
-    BuildResult,
-    BuildStatus,
     Builder,
     BuilderInputBundle,
     BuilderInputManifest,
     BuilderPreflightResult,
+    BuildRequest,
+    BuildResult,
+    BuildStatus,
 )
 from gdpval_harness.evaluators.base import EvaluationPlan, Evaluator, EvaluatorPreflightResult
 from gdpval_harness.executors.base import Executor, PreflightResult, TaskSpec
@@ -313,10 +313,7 @@ def _validate_profile_and_components(
         raise RuntimeError("application executor preflight failed or returned a mismatched identity")
 
     builder_preflight = _require_exact_result(builder.preflight(), BuilderPreflightResult, "builder preflight result")
-    if (
-        builder_preflight.ok is not True
-        or builder_preflight.builder_executor != run_config.builder_executor
-    ):
+    if builder_preflight.ok is not True or builder_preflight.builder_executor != run_config.builder_executor:
         raise RuntimeError("builder preflight failed or returned a mismatched builder executor identity")
     builder_name = getattr(builder, "name", None)
     if not isinstance(builder_name, str) or builder_preflight.name != builder_name:
@@ -411,10 +408,7 @@ def _manifest_payload(manifest: BuilderInputManifest) -> dict[str, object]:
         "revision_status": manifest.revision_status,
         "bundle_sha256": manifest.bundle_sha256,
         "manifest_sha256": manifest.manifest_sha256,
-        "files": [
-            {"path": item.path, "size": item.size, "sha256": item.sha256}
-            for item in manifest.files
-        ],
+        "files": [{"path": item.path, "size": item.size, "sha256": item.sha256} for item in manifest.files],
     }
 
 
@@ -549,14 +543,9 @@ def _configuration_payload(
             }
             for spec in profile.profile.inputs
         ],
-        "arms": [
-            {"arm_id": arm.arm_id, "builder_inputs": list(arm.builder_inputs)}
-            for arm in profile.profile.arms
-        ],
+        "arms": [{"arm_id": arm.arm_id, "builder_inputs": list(arm.builder_inputs)} for arm in profile.profile.arms],
         "builder": _builder_descriptor(builder, builder_preflight, config),
-        "application_executor": _application_executor_descriptor(
-            application_executor, application_preflight, config
-        ),
+        "application_executor": _application_executor_descriptor(application_executor, application_preflight, config),
         "evaluator": _evaluator_descriptor(evaluator_preflight),
     }
 
@@ -693,10 +682,7 @@ def _initial_metadata(
                 "manifest": _manifest_payload(bundle.manifest),
             }
         )
-    arms = [
-        {"arm_id": arm.arm_id, "builder_inputs": list(arm.builder_inputs)}
-        for arm in profile.profile.arms
-    ]
+    arms = [{"arm_id": arm.arm_id, "builder_inputs": list(arm.builder_inputs)} for arm in profile.profile.arms]
     entries = [
         {
             "index": item.index,
@@ -773,10 +759,7 @@ def _artifact_payload(bundle: InterventionBundle) -> dict[str, object]:
         "revision_status": _nullable_text(manifest.revision_status),
         "bundle_sha256": manifest.bundle_sha256,
         "manifest_sha256": manifest.manifest_sha256,
-        "files": [
-            {"path": item.path, "size": item.size, "sha256": item.sha256}
-            for item in manifest.files
-        ],
+        "files": [{"path": item.path, "size": item.size, "sha256": item.sha256} for item in manifest.files],
         "application": {
             "method": _nullable_text(manifest.application.method),
             "target": _nullable_text(manifest.application.target),
@@ -947,10 +930,7 @@ def run_builder_experiment(
             )
         )
 
-    task_records = [
-        {"task_id": task.execution.task_id, "task_sha256": task_sha256(task.execution)}
-        for task in tasks
-    ]
+    task_records = [{"task_id": task.execution.task_id, "task_sha256": task_sha256(task.execution)} for task in tasks]
     task_hashes = {str(record["task_id"]): str(record["task_sha256"]) for record in task_records}
     configuration = _configuration_payload(
         profile,
@@ -1035,9 +1015,7 @@ def run_builder_experiment(
             _persist_metadata(metadata_path, metadata, status="running", completed=completed, finished=False)
 
             if build_result.status is not BuildStatus.COMPLETED:
-                final_status = (
-                    "interrupted" if build_result.status is BuildStatus.INTERRUPTED else "failed"
-                )
+                final_status = "interrupted" if build_result.status is BuildStatus.INTERRUPTED else "failed"
                 _persist_metadata(metadata_path, metadata, status=final_status, completed=completed, finished=True)
                 return ExperimentRunSummary(
                     profile.profile.profile_id,
@@ -1068,9 +1046,7 @@ def run_builder_experiment(
                     timeout_seconds=run_config.application_timeout_seconds,
                     intervention=intervention,
                 )
-                application_summary = _require_exact_result(
-                    application_summary, RunSummary, "application run summary"
-                )
+                application_summary = _require_exact_result(application_summary, RunSummary, "application run summary")
                 if (
                     application_summary.out_dir != item.output_root
                     or application_summary.runtime_root != item.application_root

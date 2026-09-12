@@ -10,14 +10,14 @@ from dataclasses import FrozenInstanceError
 from pathlib import Path
 
 from gdpval_harness.builders import (
-    BuildFailurePhase,
-    BuildRequest,
-    BuildResult,
-    BuildStatus,
     Builder,
     BuilderInputBundle,
     BuilderInputManifest,
     BuilderPreflightResult,
+    BuildFailurePhase,
+    BuildRequest,
+    BuildResult,
+    BuildStatus,
     canonical_builder_input_manifest_bytes,
 )
 from gdpval_harness.executors.base import ExecutionResult, ExecutionStatus, TaskSpec
@@ -199,9 +199,7 @@ class BuilderContractTests(unittest.TestCase):
         with self.assertRaises(TypeError):
             BuildRequest("build-1", object(), (), "/runtime", "/artifacts")  # type: ignore[arg-type]
         with self.assertRaises(TypeError):
-            BuildRequest(
-                "build-1", TaskSpec("task-1", "prompt"), (object(),), "/runtime", "/artifacts"
-            )  # type: ignore[arg-type]
+            BuildRequest("build-1", TaskSpec("task-1", "prompt"), (object(),), "/runtime", "/artifacts")  # type: ignore[arg-type]
         with self.assertRaises(ValueError):
             BuildRequest(
                 "build-1",
@@ -216,9 +214,7 @@ class BuilderContractTests(unittest.TestCase):
                     "build-1", TaskSpec("task-1", "prompt"), (), "/runtime", "/artifacts", timeout_seconds=timeout
                 )
         with self.assertRaises(TypeError):
-            BuildRequest(
-                "build-1", TaskSpec("task-1", "prompt"), (), "/runtime", "/artifacts", timeout_seconds="10"
-            )  # type: ignore[arg-type]
+            BuildRequest("build-1", TaskSpec("task-1", "prompt"), (), "/runtime", "/artifacts", timeout_seconds="10")  # type: ignore[arg-type]
         with self.assertRaises(TypeError):
             BuildRequest(
                 "build-1",

@@ -12,6 +12,8 @@ The fork currently retains the upstream engine instead of copying GDPval code in
 
 The root `./gdpval` command is intentionally a thin orchestration layer over those components.
 
+The generated [upstream environment inventory](UPSTREAM-ENVIRONMENTS.md) remains available separately from the GDPval-focused root README.
+
 ## Fork policy
 
 Harness-specific behavior should stay at the root CLI, `scripts/gdpval_*`, and `config/` where possible. Changes to embedded upstream GDPval code should be kept small and justified by a harness requirement.

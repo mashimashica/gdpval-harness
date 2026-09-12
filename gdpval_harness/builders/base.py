@@ -99,10 +99,7 @@ def _canonical_builder_input_manifest_payload(manifest: "BuilderInputManifest") 
         "input_type": manifest.input_type,
         "source_revision": manifest.source_revision,
         "revision_status": manifest.revision_status,
-        "files": [
-            {"path": item.path, "size": item.size, "sha256": item.sha256}
-            for item in manifest.files
-        ],
+        "files": [{"path": item.path, "size": item.size, "sha256": item.sha256} for item in manifest.files],
         "bundle_sha256": manifest.bundle_sha256,
     }
 

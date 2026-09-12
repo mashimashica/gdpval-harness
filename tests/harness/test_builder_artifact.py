@@ -128,9 +128,7 @@ class GeneratedSkillArtifactTests(unittest.TestCase):
             deliverables.mkdir()
             skill = deliverables / "Generated-Skill"
             skill.mkdir()
-            (skill / "SKILL.md").write_text(
-                "---\nname: Generated-Skill\ndescription: bad\n---\n", encoding="utf-8"
-            )
+            (skill / "SKILL.md").write_text("---\nname: Generated-Skill\ndescription: bad\n---\n", encoding="utf-8")
             with self.assertRaises(GeneratedSkillValidationError):
                 artifact_module.seal_generated_skill(deliverables, root / "bad-name-artifact")
 
@@ -224,9 +222,7 @@ class GeneratedSkillArtifactTests(unittest.TestCase):
             deliverables, skill = self._skill(root, name="interrupt-skill")
             artifact_root = root / "interrupt-artifact"
             original_skill = {
-                path.relative_to(skill).as_posix(): path.read_bytes()
-                for path in skill.rglob("*")
-                if path.is_file()
+                path.relative_to(skill).as_posix(): path.read_bytes() for path in skill.rglob("*") if path.is_file()
             }
             real_copy = artifact_module._copy_exclusive
             calls = 0
@@ -244,11 +240,7 @@ class GeneratedSkillArtifactTests(unittest.TestCase):
             self.assertEqual(calls, 2)
             self.assertFalse(artifact_root.exists())
             self.assertEqual(
-                {
-                    path.relative_to(skill).as_posix(): path.read_bytes()
-                    for path in skill.rglob("*")
-                    if path.is_file()
-                },
+                {path.relative_to(skill).as_posix(): path.read_bytes() for path in skill.rglob("*") if path.is_file()},
                 original_skill,
             )
 

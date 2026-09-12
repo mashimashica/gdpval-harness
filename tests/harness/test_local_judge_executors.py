@@ -51,9 +51,7 @@ class LocalJudgeExecutorTests(unittest.TestCase):
             self.assertIn("--ignore-user-config", command)
             self.assertIn('approval_policy="never"', command)
             self.assertIn('default_permissions="gdpval-harness-blind-judge"', command)
-            profile = next(
-                item for item in command if item.startswith("permissions.gdpval-harness-blind-judge=")
-            )
+            profile = next(item for item in command if item.startswith("permissions.gdpval-harness-blind-judge="))
             self.assertIn('":root"="deny"', profile)
             self.assertIn('":minimal"="read"', profile)
             self.assertIn(json.dumps(str(request.workspace.resolve())), profile)
@@ -74,9 +72,7 @@ class LocalJudgeExecutorTests(unittest.TestCase):
             command_path.chmod(0o755)
             request = self.request(root, environment={"PATH": str(runtime_bin), "HOME": str(auth_home)})
             command = CodexJudgeExecutor(command=str(command_path)).build_command(request)
-            profile = next(
-                item for item in command if item.startswith("permissions.gdpval-harness-blind-judge=")
-            )
+            profile = next(item for item in command if item.startswith("permissions.gdpval-harness-blind-judge="))
             self.assertIn(json.dumps(str(command_path.resolve())), profile)
             self.assertNotIn(f'{json.dumps(str(auth_home.resolve()))}="read"', profile)
 
@@ -106,9 +102,7 @@ class LocalJudgeExecutorTests(unittest.TestCase):
                 clear=False,
             ):
                 command = CodexJudgeExecutor(command=str(command_path)).build_command(request)
-            profile = next(
-                item for item in command if item.startswith("permissions.gdpval-harness-blind-judge=")
-            )
+            profile = next(item for item in command if item.startswith("permissions.gdpval-harness-blind-judge="))
             self.assertIn(json.dumps(str(command_path.resolve())), profile)
             self.assertNotIn(f'{json.dumps(str(runtime_root.resolve()))}="read"', profile)
 

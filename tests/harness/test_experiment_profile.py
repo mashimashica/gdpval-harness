@@ -88,10 +88,7 @@ class ExperimentProfileLoaderTests(unittest.TestCase):
             profile_id="profile-a",
             benchmark="benchmark-a",
             inputs=specs,
-            arms=tuple(
-                ExperimentArm(f"arm-{index}", (spec.input_id,))
-                for index, spec in enumerate(specs)
-            ),
+            arms=tuple(ExperimentArm(f"arm-{index}", (spec.input_id,)) for index, spec in enumerate(specs)),
         )
 
     def test_loads_contract_objects_and_hashes_exact_profile_bytes(self) -> None:
@@ -120,8 +117,8 @@ class ExperimentProfileLoaderTests(unittest.TestCase):
                 "duplicate": malformed,
                 "unknown": json.dumps(self._payload() | {"secret-member": "must not echo"}),
                 "missing": json.dumps({key: value for key, value in self._payload().items() if key != "arms"}),
-                "nan": valid.replace("\"schema_version\":1", '"schema_version":NaN'),
-                "infinite": valid.replace("\"schema_version\":1", '"schema_version":1e999'),
+                "nan": valid.replace('"schema_version":1', '"schema_version":NaN'),
+                "infinite": valid.replace('"schema_version":1', '"schema_version":1e999'),
             }
             for name, content in cases.items():
                 with self.subTest(case=name):

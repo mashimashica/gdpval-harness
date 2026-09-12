@@ -11,11 +11,11 @@ from unittest.mock import patch
 
 from gdpval_harness.benchmarks.base import Benchmark, BenchmarkTask
 from gdpval_harness.builders.base import (
+    Builder,
+    BuilderPreflightResult,
     BuildRequest,
     BuildResult,
     BuildStatus,
-    Builder,
-    BuilderPreflightResult,
 )
 from gdpval_harness.builders.inputs import load_builder_input_bundle
 from gdpval_harness.evaluators.base import (
@@ -318,15 +318,19 @@ class BuilderExperimentRunnerTests(unittest.TestCase):
             )
         schedule_ids = schedule_ids or [f"{index:032x}" for index in range(1, 100)]
         application_ids = application_ids or [f"application-run-{index}" for index in range(1, 100)]
-        with patch(
-            "gdpval_harness.experiments.runner.load_experiment_inputs",
-            return_value={"input-guide": source_bundle},
-        ) as input_loader, patch(
-            "gdpval_harness.experiments.runner.secrets.token_hex",
-            side_effect=schedule_ids,
-        ), patch(
-            "gdpval_harness.runner.secrets.token_urlsafe",
-            side_effect=application_ids,
+        with (
+            patch(
+                "gdpval_harness.experiments.runner.load_experiment_inputs",
+                return_value={"input-guide": source_bundle},
+            ) as input_loader,
+            patch(
+                "gdpval_harness.experiments.runner.secrets.token_hex",
+                side_effect=schedule_ids,
+            ),
+            patch(
+                "gdpval_harness.runner.secrets.token_urlsafe",
+                side_effect=application_ids,
+            ),
         ):
             summary = run_builder_experiment(
                 profile,
@@ -464,14 +468,10 @@ class BuilderExperimentRunnerTests(unittest.TestCase):
                 actual_application_run_id = nested_row["intervention"]["application_run_id"]
                 self.assertNotEqual(entry["schedule_id"], actual_application_run_id)
                 matching_entry = next(
-                    candidate
-                    for candidate in metadata["entries"]
-                    if candidate["schedule_id"] == entry["schedule_id"]
+                    candidate for candidate in metadata["entries"] if candidate["schedule_id"] == entry["schedule_id"]
                 )
                 self.assertEqual(matching_entry["task_sha256"], entry["task_sha256"])
-                self.assertEqual(
-                    matching_entry["application"]["application_run_id"], actual_application_run_id
-                )
+                self.assertEqual(matching_entry["application"]["application_run_id"], actual_application_run_id)
                 self.assertEqual(matching_entry["application"]["application_run_id_status"], "available")
                 self.assertEqual(
                     Path(matching_entry["application"]["run_metadata_path"]),
@@ -488,9 +488,7 @@ class BuilderExperimentRunnerTests(unittest.TestCase):
                 serialized_prompt = request.task.prompt
                 serialized_environment = json.dumps(request.environment)
                 workspace_contents = "\n".join(
-                    path.read_text(encoding="utf-8")
-                    for path in request.workspace.rglob("*")
-                    if path.is_file()
+                    path.read_text(encoding="utf-8") for path in request.workspace.rglob("*") if path.is_file()
                 )
                 for sentinel in (
                     "private builder output sentinel",
@@ -628,15 +626,19 @@ class BuilderExperimentRunnerTests(unittest.TestCase):
                 source_bundle,
             ) = self._fixture(root, task_count=1)
             benchmark.tasks = (BenchmarkTask(TaskSpec("unsafe/task", "prompt"), evaluation={}),)
-            with patch(
-                "gdpval_harness.experiments.runner.load_experiment_inputs",
-                return_value={"input-guide": source_bundle},
-            ), patch(
-                "gdpval_harness.experiments.runner.secrets.token_hex",
-                side_effect=[f"{index:032x}" for index in range(1, 100)],
-            ), patch(
-                "gdpval_harness.runner.secrets.token_urlsafe",
-                side_effect=[f"application-run-{index}" for index in range(1, 100)],
+            with (
+                patch(
+                    "gdpval_harness.experiments.runner.load_experiment_inputs",
+                    return_value={"input-guide": source_bundle},
+                ),
+                patch(
+                    "gdpval_harness.experiments.runner.secrets.token_hex",
+                    side_effect=[f"{index:032x}" for index in range(1, 100)],
+                ),
+                patch(
+                    "gdpval_harness.runner.secrets.token_urlsafe",
+                    side_effect=[f"application-run-{index}" for index in range(1, 100)],
+                ),
             ):
                 summary = run_builder_experiment(
                     profile,
@@ -693,15 +695,19 @@ class BuilderExperimentRunnerTests(unittest.TestCase):
             root = Path(temporary)
             profile, config, benchmark, evaluator, _, application, source_bundle = self._fixture(root)
             builder = _Builder(fail_on_call=2)
-            with patch(
-                "gdpval_harness.experiments.runner.load_experiment_inputs",
-                return_value={"input-guide": source_bundle},
-            ), patch(
-                "gdpval_harness.experiments.runner.secrets.token_hex",
-                side_effect=[f"{index:032x}" for index in range(1, 100)],
-            ), patch(
-                "gdpval_harness.runner.secrets.token_urlsafe",
-                side_effect=[f"application-run-{index}" for index in range(1, 100)],
+            with (
+                patch(
+                    "gdpval_harness.experiments.runner.load_experiment_inputs",
+                    return_value={"input-guide": source_bundle},
+                ),
+                patch(
+                    "gdpval_harness.experiments.runner.secrets.token_hex",
+                    side_effect=[f"{index:032x}" for index in range(1, 100)],
+                ),
+                patch(
+                    "gdpval_harness.runner.secrets.token_urlsafe",
+                    side_effect=[f"application-run-{index}" for index in range(1, 100)],
+                ),
             ):
                 summary = run_builder_experiment(
                     profile,
@@ -755,15 +761,19 @@ class BuilderExperimentRunnerTests(unittest.TestCase):
             root = Path(temporary)
             profile, config, benchmark, evaluator, _, application, source_bundle = self._fixture(root)
             builder = _Builder(interrupt_on_call=1)
-            with patch(
-                "gdpval_harness.experiments.runner.load_experiment_inputs",
-                return_value={"input-guide": source_bundle},
-            ), patch(
-                "gdpval_harness.experiments.runner.secrets.token_hex",
-                side_effect=[f"{index:032x}" for index in range(1, 100)],
-            ), patch(
-                "gdpval_harness.runner.secrets.token_urlsafe",
-                side_effect=[f"application-run-{index}" for index in range(1, 100)],
+            with (
+                patch(
+                    "gdpval_harness.experiments.runner.load_experiment_inputs",
+                    return_value={"input-guide": source_bundle},
+                ),
+                patch(
+                    "gdpval_harness.experiments.runner.secrets.token_hex",
+                    side_effect=[f"{index:032x}" for index in range(1, 100)],
+                ),
+                patch(
+                    "gdpval_harness.runner.secrets.token_urlsafe",
+                    side_effect=[f"application-run-{index}" for index in range(1, 100)],
+                ),
             ):
                 with self.assertRaises(KeyboardInterrupt):
                     run_builder_experiment(
@@ -788,15 +798,19 @@ class BuilderExperimentRunnerTests(unittest.TestCase):
             root = Path(temporary)
             profile, config, benchmark, evaluator, builder, _, source_bundle = self._fixture(root)
             application = _ApplicationExecutor(interrupt_on_call=1)
-            with patch(
-                "gdpval_harness.experiments.runner.load_experiment_inputs",
-                return_value={"input-guide": source_bundle},
-            ), patch(
-                "gdpval_harness.experiments.runner.secrets.token_hex",
-                side_effect=[f"{index:032x}" for index in range(1, 100)],
-            ), patch(
-                "gdpval_harness.runner.secrets.token_urlsafe",
-                side_effect=[f"application-run-{index}" for index in range(1, 100)],
+            with (
+                patch(
+                    "gdpval_harness.experiments.runner.load_experiment_inputs",
+                    return_value={"input-guide": source_bundle},
+                ),
+                patch(
+                    "gdpval_harness.experiments.runner.secrets.token_hex",
+                    side_effect=[f"{index:032x}" for index in range(1, 100)],
+                ),
+                patch(
+                    "gdpval_harness.runner.secrets.token_urlsafe",
+                    side_effect=[f"application-run-{index}" for index in range(1, 100)],
+                ),
             ):
                 with self.assertRaises(KeyboardInterrupt):
                     run_builder_experiment(
@@ -824,15 +838,19 @@ class BuilderExperimentRunnerTests(unittest.TestCase):
             root = Path(temporary)
             profile, config, benchmark, evaluator, builder, _, source_bundle = self._fixture(root)
             application = _ApplicationExecutor(fail_on_call=2)
-            with patch(
-                "gdpval_harness.experiments.runner.load_experiment_inputs",
-                return_value={"input-guide": source_bundle},
-            ), patch(
-                "gdpval_harness.experiments.runner.secrets.token_hex",
-                side_effect=[f"{index:032x}" for index in range(1, 100)],
-            ), patch(
-                "gdpval_harness.runner.secrets.token_urlsafe",
-                side_effect=[f"application-run-{index}" for index in range(1, 100)],
+            with (
+                patch(
+                    "gdpval_harness.experiments.runner.load_experiment_inputs",
+                    return_value={"input-guide": source_bundle},
+                ),
+                patch(
+                    "gdpval_harness.experiments.runner.secrets.token_hex",
+                    side_effect=[f"{index:032x}" for index in range(1, 100)],
+                ),
+                patch(
+                    "gdpval_harness.runner.secrets.token_urlsafe",
+                    side_effect=[f"application-run-{index}" for index in range(1, 100)],
+                ),
             ):
                 summary = run_builder_experiment(
                     profile,

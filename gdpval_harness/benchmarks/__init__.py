@@ -3,4 +3,5 @@
 
 from gdpval_harness.benchmarks.base import Benchmark, BenchmarkTask
 
+
 __all__ = ["Benchmark", "BenchmarkTask"]

@@ -11,7 +11,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from gdpval_harness.benchmarks.bigcodebench import BigCodeBenchBenchmark
-from gdpval_harness.evaluators.base import EvaluationCandidate, EvaluationRequest, EvaluationStatus, EvaluatorType
+from gdpval_harness.evaluators.base import EvaluationCandidate, EvaluationRequest, EvaluatorType
 from gdpval_harness.evaluators.bigcodebench import BigCodeBenchEvaluator, _native_bigcodebench_evaluate
 from gdpval_harness.executors.base import ExecutionResult, ExecutionStatus
 

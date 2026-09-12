@@ -348,8 +348,7 @@ def _preflight(for_run: bool) -> tuple[bool, dict[str, object]]:
         existing = [str(path) for path in occupied if path.exists()]
         if existing:
             details.append(
-                "local judge output already contains prior run data; use a new --out directory: "
-                + ", ".join(existing)
+                "local judge output already contains prior run data; use a new --out directory: " + ", ".join(existing)
             )
             ok = False
     try:
@@ -388,7 +387,9 @@ def _write_run_metadata(out_dir: Path, preflight: dict[str, object]) -> None:
     subprocess.run([sys.executable, str(ROOT / "scripts" / "gdpval_run_metadata.py")], cwd=ROOT, env=env, check=True)
 
 
-def _persist_executor_logs(out_dir: Path, task_key: str, trial_index: int, source: Path, row: dict[str, object]) -> None:
+def _persist_executor_logs(
+    out_dir: Path, task_key: str, trial_index: int, source: Path, row: dict[str, object]
+) -> None:
     target = out_dir / "judge" / "tasks" / task_key / f"trial_{trial_index}" / "executor"
     target.parent.mkdir(parents=True, exist_ok=True)
     if target.exists():
@@ -397,7 +398,9 @@ def _persist_executor_logs(out_dir: Path, task_key: str, trial_index: int, sourc
     write_trial_metadata(target / "metadata.json", row)
 
 
-def _interrupted_row(task_key: str, trial_index: int, swapped: bool, preflight: dict[str, object]) -> dict[str, object]:
+def _interrupted_row(
+    task_key: str, trial_index: int, swapped: bool, preflight: dict[str, object]
+) -> dict[str, object]:
     row = {
         "task_id": task_key.removeprefix("task_"),
         "trial_index": trial_index,

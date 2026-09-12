@@ -36,9 +36,7 @@ class FileInterventionTests(unittest.TestCase):
                 ["a.txt", "nested/b.txt"],
             )
 
-            application = intervention.apply(
-                TaskSpec("task-1", "prompt"), workspace, application_run_id="run-1"
-            )
+            application = intervention.apply(TaskSpec("task-1", "prompt"), workspace, application_run_id="run-1")
             self.assertEqual([item.path for item in application.materialized_files], ["a.txt", "nested/b.txt"])
             self.assertEqual(application.application.method, "workspace-files")
             self.assertEqual(application.application.target, ".")

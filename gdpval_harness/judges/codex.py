@@ -105,10 +105,10 @@ def _permission_profile(workspace: Path, runtime_read_paths: tuple[str, ...] = (
     entries = [
         '":root"="deny"',
         '":minimal"="read"',
-        f"{_toml_string(str(workspace.resolve()))}=\"read\"",
+        f'{_toml_string(str(workspace.resolve()))}="read"',
     ]
-    entries.extend(f"{_toml_string(path)}=\"read\"" for path in runtime_read_paths)
-    return f'{{filesystem={{{",".join(entries)}}},network={{enabled=false}}}}'
+    entries.extend(f'{_toml_string(path)}="read"' for path in runtime_read_paths)
+    return f"{{filesystem={{{','.join(entries)}}},network={{enabled=false}}}}"
 
 
 def _profile_overrides(workspace: Path, runtime_read_paths: tuple[str, ...] = ()) -> list[str]:
@@ -388,7 +388,9 @@ class CodexJudgeExecutor(JudgeExecutor):
             exit_code = completed.returncode
             if exit_code == 0:
                 stdout = stdout_path.read_text(encoding="utf-8", errors="replace")
-                final_text = final_path.read_text(encoding="utf-8", errors="replace") if final_path.is_file() else stdout
+                final_text = (
+                    final_path.read_text(encoding="utf-8", errors="replace") if final_path.is_file() else stdout
+                )
                 try:
                     verdict = parse_verdict(final_text)
                 except ValueError as exc:

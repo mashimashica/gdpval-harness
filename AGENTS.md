@@ -144,7 +144,7 @@ gym env resolve --config ...
 
 Notable custom hooks that auto-modify files:
 - `add-verified-flag`: Adds `verified: false` to new resources server YAML configs (`verified: true` means the benchmark has been baselined and reviewed; new servers start as `false`)
-- `update-readme-table`: Updates the resources server table in root README.md
+- `update-readme-table`: Updates the resources server table in UPSTREAM-ENVIRONMENTS.md
 - `ruff-format`: Auto-formats code
 
 First run may fail as hooks modify files. Stage the changes and commit again.

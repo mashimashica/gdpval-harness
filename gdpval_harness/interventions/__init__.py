@@ -23,6 +23,7 @@ from gdpval_harness.interventions.prompt_overlay import (
 )
 from gdpval_harness.interventions.registry import create_intervention, get_intervention
 
+
 __all__ = [
     "ApplicationMapping",
     "AgentSkillIntervention",

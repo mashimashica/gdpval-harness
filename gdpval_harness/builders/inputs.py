@@ -295,10 +295,7 @@ def _snapshot_manifest_files(root: Path, manifest: BuilderInputManifest) -> tupl
             content = _read_allowlisted_file(root, item.path)
         except (OSError, ValueError, IndexError) as exc:
             raise RuntimeError(f"builder input source changed after validation: {item.path!r}") from exc
-        if (
-            len(content) != item.size
-            or hashlib.sha256(content).hexdigest() != item.sha256
-        ):
+        if len(content) != item.size or hashlib.sha256(content).hexdigest() != item.sha256:
             raise RuntimeError(f"builder input source changed after validation: {item.path!r}")
         entries.append((item.path, content))
 
@@ -394,9 +391,7 @@ def _validate_destination_namespace(workspace: Path, source_roots: Sequence[Path
     # case-insensitive filesystem even though it is distinct on this host.
     try:
         collisions = [
-            child
-            for child in workspace.iterdir()
-            if _collision_key(child.name) == _collision_key("reference_files")
+            child for child in workspace.iterdir() if _collision_key(child.name) == _collision_key("reference_files")
         ]
     except OSError as exc:
         raise ValueError("could not inspect builder workspace") from exc

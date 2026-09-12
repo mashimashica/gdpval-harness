@@ -168,9 +168,7 @@ class ExperimentContractTests(unittest.TestCase):
 
         for schema_version in (0, 2, -1, True, 1.0, "1"):
             with self.subTest(schema_version=schema_version), self.assertRaises((TypeError, ValueError)):
-                ExperimentProfile(
-                    schema_version, "profile-a", "benchmark-a", (self.input(),), (self.arm(),)
-                )  # type: ignore[arg-type]
+                ExperimentProfile(schema_version, "profile-a", "benchmark-a", (self.input(),), (self.arm(),))  # type: ignore[arg-type]
 
         for source_revision, revision_status in (
             (None, "available"),
@@ -180,16 +178,15 @@ class ExperimentContractTests(unittest.TestCase):
             (None, "unknown"),
             ("rev", "AVAILABLE"),
         ):
-            with self.subTest(source_revision=source_revision, revision_status=revision_status), self.assertRaises(
-                ValueError
+            with (
+                self.subTest(source_revision=source_revision, revision_status=revision_status),
+                self.assertRaises(ValueError),
             ):
                 ExperimentInputSpec("input-a", "files", source_revision, revision_status, ("a.txt",))
 
         for digest in ("A" * 64, "g" * 64, "a" * 63, "a" * 65, 1):
             with self.subTest(digest=digest), self.assertRaises(ValueError):
-                ExperimentInputSpec(
-                    "input-a", "files", None, "unavailable", ("a.txt",), digest
-                )  # type: ignore[arg-type]
+                ExperimentInputSpec("input-a", "files", None, "unavailable", ("a.txt",), digest)  # type: ignore[arg-type]
 
     def test_allowed_file_paths_reject_unsafe_forms_and_collisions(self) -> None:
         invalid_paths = (
@@ -283,9 +280,7 @@ class ExperimentContractTests(unittest.TestCase):
                 ExperimentRunSummary("profile-a", "benchmark-a", Path("out"), Path("runtime"), status, 0, 0, 0)
         for counts in ((-1, 0, 0), (0, -1, 0), (0, 0, -1), (1, 1, 2), (True, 1, 0)):
             with self.subTest(counts=counts), self.assertRaises((TypeError, ValueError)):
-                ExperimentRunSummary(
-                    "profile-a", "benchmark-a", Path("out"), Path("runtime"), "failed", *counts
-                )  # type: ignore[arg-type]
+                ExperimentRunSummary("profile-a", "benchmark-a", Path("out"), Path("runtime"), "failed", *counts)  # type: ignore[arg-type]
 
     def test_run_config_is_shared_and_rejects_invalid_values(self) -> None:
         config = self.config()

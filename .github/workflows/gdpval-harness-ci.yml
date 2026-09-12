@@ -63,7 +63,7 @@ jobs:
         run: |
           set -euo pipefail
           export UV_PYTHON="${PYTHON_VERSION}"
-          uvx --from "pre-commit==3.6.0" pre-commit run --all-files --show-diff-on-failure --color=always 2>&1 \
+          uvx --from "pre-commit==4.3.0" pre-commit run --all-files --show-diff-on-failure --color=always 2>&1 \
             | tee ci-artifacts/lint/pre-commit.log
 
       - name: Upload lint logs

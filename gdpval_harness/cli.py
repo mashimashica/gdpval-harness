@@ -155,10 +155,7 @@ def _print_benchmarks() -> None:
 
 def _print_executors() -> None:
     for descriptor in list_executors():
-        print(
-            f"{descriptor.name}\t{descriptor.runtime}\t{descriptor.usage_mode}\t"
-            f"{descriptor.generic_runner_status}"
-        )
+        print(f"{descriptor.name}\t{descriptor.runtime}\t{descriptor.usage_mode}\t{descriptor.generic_runner_status}")
 
 
 def _run(args: argparse.Namespace) -> int:

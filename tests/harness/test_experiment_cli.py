@@ -233,9 +233,10 @@ class ExperimentCLIParsingTests(unittest.TestCase):
             self.helpers.runner.assert_not_called()
 
     def test_invalid_numeric_argument_is_rejected_before_profile_loader(self) -> None:
-        with patch.object(cli, "load_experiment_profile", Mock()) as loader, patch.object(
-            cli, "run_builder_experiment", Mock()
-        ) as runner:
+        with (
+            patch.object(cli, "load_experiment_profile", Mock()) as loader,
+            patch.object(cli, "run_builder_experiment", Mock()) as runner,
+        ):
             with self.assertRaises(SystemExit) as raised:
                 cli.main(self.helpers.argv("--limit", "0"))
             self.assertEqual(raised.exception.code, 2)

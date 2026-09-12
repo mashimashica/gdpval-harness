@@ -124,7 +124,7 @@ gym env test --resources-server your_server         # server tests + data valida
 | `ruff-format` | Code formatting |
 | `no-underscore-md` | No underscores in Markdown filenames (use hyphens) |
 | `add-verified-flag` | New resources server YAML configs get `verified: false` injected automatically |
-| `update-readme-table` | Root `README.md` environment table kept in sync |
+| `update-readme-table` | `UPSTREAM-ENVIRONMENTS.md` environment table kept in sync |
 
 Hooks that auto-modify files (`ruff`, `ruff-format`, `add-verified-flag`, `update-readme-table`) may fail the first run while they rewrite files — stage the changes and commit again.
 

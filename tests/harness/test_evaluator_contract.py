@@ -73,9 +73,7 @@ class EvaluatorContractTests(unittest.TestCase):
         for evaluator in (ExactMatchEvaluator(), AIME26Evaluator()):
             with self.subTest(evaluator=evaluator.name):
                 with self.assertRaisesRegex(ValueError, "exactly one candidate"):
-                    evaluator.validate_plan(
-                        EvaluationPlan("task", "prompt", {"expected_answer": "42"}, 2)
-                    )
+                    evaluator.validate_plan(EvaluationPlan("task", "prompt", {"expected_answer": "42"}, 2))
                 with self.assertRaisesRegex(ValueError, "expected_answer"):
                     evaluator.validate_plan(EvaluationPlan("task", "prompt", {}, 1))
 

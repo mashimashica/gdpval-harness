@@ -32,9 +32,7 @@ _GIT_HEAD_TIMEOUT_SECONDS = 10.0
 _GIT_HEAD_PATTERN = re.compile(r"[0-9a-f]{40}\Z")
 
 _PROFILE_KEYS = frozenset({"schema_version", "profile_id", "benchmark", "inputs", "arms"})
-_INPUT_KEYS = frozenset(
-    {"input_id", "input_type", "source_revision", "revision_status", "allowed_files"}
-)
+_INPUT_KEYS = frozenset({"input_id", "input_type", "source_revision", "revision_status", "allowed_files"})
 _INPUT_OPTIONAL_KEYS = frozenset({"expected_bundle_sha256"})
 _ARM_KEYS = frozenset({"arm_id", "builder_inputs"})
 

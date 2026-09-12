@@ -3,9 +3,9 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from pathlib import Path
-import re
 
 
 _SAFE_TASK_ID = re.compile(r"[^A-Za-z0-9._-]+")

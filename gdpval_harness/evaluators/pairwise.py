@@ -22,7 +22,7 @@ from gdpval_harness.evaluators.base import (
     require_two_candidates,
 )
 from gdpval_harness.executors.base import ExecutionStatus
-from gdpval_harness.judges.base import JudgeExecutor, JudgePreflightResult, JudgeRequest, JudgeResult, Verdict
+from gdpval_harness.judges.base import JudgeExecutor, JudgePreflightResult, JudgeRequest, Verdict
 from gdpval_harness.judges.pairwise import (
     aggregate,
     build_judge_prompt,
@@ -83,11 +83,7 @@ def sanitize_environment(environment: Mapping[str, str] | None) -> dict[str, str
 
     if not environment:
         return {}
-    return {
-        str(name): str(value)
-        for name, value in environment.items()
-        if str(name) in _ENVIRONMENT_ALLOWLIST
-    }
+    return {str(name): str(value) for name, value in environment.items() if str(name) in _ENVIRONMENT_ALLOWLIST}
 
 
 def _call_preflight(judge: JudgeExecutor, environment: Mapping[str, str]) -> JudgePreflightResult:
@@ -105,8 +101,7 @@ def _call_preflight(judge: JudgeExecutor, environment: Mapping[str, str]) -> Jud
     positional = tuple(
         parameter
         for parameter in parameters
-        if parameter.kind
-        in (inspect.Parameter.POSITIONAL_ONLY, inspect.Parameter.POSITIONAL_OR_KEYWORD)
+        if parameter.kind in (inspect.Parameter.POSITIONAL_ONLY, inspect.Parameter.POSITIONAL_OR_KEYWORD)
     )
     accepts_varargs = any(parameter.kind is inspect.Parameter.VAR_POSITIONAL for parameter in parameters)
     keyword_environment = any(
@@ -355,9 +350,7 @@ class PairwiseJudgeEvaluator(Evaluator):
                     }
                 )
                 _write_trial_metadata_preserving(prepared.executor_dir, row)
-                raise RuntimeError(
-                    f"pairwise judge failed for task {request.task_id!r} trial {trial_index}"
-                ) from exc
+                raise RuntimeError(f"pairwise judge failed for task {request.task_id!r} trial {trial_index}") from exc
             except BaseException as exc:
                 row.update(
                     {

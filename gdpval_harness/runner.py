@@ -95,11 +95,7 @@ def _append_jsonl(handle, payload: Mapping[str, object]) -> None:
 def _executor_environment() -> dict[str, str]:
     """Pass the generic executor a clean environment without legacy labels."""
 
-    return {
-        key: value
-        for key, value in os.environ.items()
-        if key not in _LEGACY_CONDITION_ENVIRONMENT_KEYS
-    }
+    return {key: value for key, value in os.environ.items() if key not in _LEGACY_CONDITION_ENVIRONMENT_KEYS}
 
 
 def _executor_reasoning_effort(executor: Executor) -> ReasoningEffortOption:
@@ -227,11 +223,7 @@ def _canonical_planned_root(path: Path, *, existing_message: str) -> Path:
 
 
 def _ensure_roots_are_separate(out_root: Path, runtime_root: Path) -> None:
-    if (
-        out_root == runtime_root
-        or out_root in runtime_root.parents
-        or runtime_root in out_root.parents
-    ):
+    if out_root == runtime_root or out_root in runtime_root.parents or runtime_root in out_root.parents:
         raise ValueError("out_dir and runtime_root must be separate, non-overlapping roots")
 
 
@@ -306,10 +298,7 @@ def _configuration_intervention(descriptor: Mapping[str, object]) -> dict[str, o
 def _configuration_evaluator(descriptor: Mapping[str, object]) -> dict[str, object]:
     """Select evaluator evidence without arbitrary preflight detail payloads."""
 
-    return {
-        key: descriptor.get(key)
-        for key in ("id", "type", "version", "revision", "judge")
-    }
+    return {key: descriptor.get(key) for key in ("id", "type", "version", "revision", "judge")}
 
 
 def _intervention_metadata(
@@ -330,10 +319,7 @@ def _intervention_metadata(
     source_revision = manifest.source_revision if manifest is not None else None
     revision_status = manifest.revision_status if manifest is not None else "unavailable"
     files = (
-        [
-            {"path": item.path, "size": item.size, "sha256": item.sha256}
-            for item in manifest.files
-        ]
+        [{"path": item.path, "size": item.size, "sha256": item.sha256} for item in manifest.files]
         if manifest is not None
         else []
     )
@@ -366,10 +352,7 @@ def _intervention_application_payload(
     """Convert application evidence into a safe durable JSON payload."""
 
     mapping = application.application
-    files = [
-        {"path": item.path, "size": item.size, "sha256": item.sha256}
-        for item in application.materialized_files
-    ]
+    files = [{"path": item.path, "size": item.size, "sha256": item.sha256} for item in application.materialized_files]
     payload = {
         "id": descriptor.get("id"),
         "type": descriptor.get("type"),
@@ -502,14 +485,9 @@ def run_benchmark(
         safe_id = safe_task_id(task_id)
         previous_task_id = safe_task_ids.get(safe_id)
         if previous_task_id is not None:
-            raise ValueError(
-                f"task ids {previous_task_id!r} and {task_id!r} collide after safe normalization"
-            )
+            raise ValueError(f"task ids {previous_task_id!r} and {task_id!r} collide after safe normalization")
         safe_task_ids[safe_id] = task_id
-    task_hashes = {
-        task.execution.task_id: task_sha256(task.execution)
-        for task in tasks
-    }
+    task_hashes = {task.execution.task_id: task_sha256(task.execution) for task in tasks}
     # Validate every task plan before creating the run directory or allowing
     # any executor to consume a model call.  An evaluator such as the explicit
     # pairwise adapter can reject the generic runner's one-candidate plan, and
@@ -531,9 +509,7 @@ def run_benchmark(
         evaluator.validate_plan(plan)
         intervention.validate_task(task.execution)
         plans.append(plan)
-    repository_info = _repository_record(
-        repository_provenance(Path(__file__).resolve().parents[1])
-    )
+    repository_info = _repository_record(repository_provenance(Path(__file__).resolve().parents[1]))
     out_dir.mkdir(parents=True, exist_ok=False)
     if runtime_root is not None:
         effective_runtime_root.mkdir(parents=True, exist_ok=False)
@@ -556,8 +532,7 @@ def run_benchmark(
     if reasoning_effort is not None:
         executor_descriptor["reasoning_effort_requested"] = reasoning_effort
     ordered_task_records = [
-        {"task_id": task.execution.task_id, "task_sha256": task_hashes[task.execution.task_id]}
-        for task in tasks
+        {"task_id": task.execution.task_id, "task_sha256": task_hashes[task.execution.task_id]} for task in tasks
     ]
     configuration: dict[str, object] = {
         "benchmark": {
@@ -765,10 +740,7 @@ def run_benchmark(
                     if result.executor != executor.name:
                         raise ValueError("executor returned a mismatched executor")
                     expected_invocation_mode = getattr(executor, "invocation_mode", None)
-                    if (
-                        expected_invocation_mode is not None
-                        and result.invocation_mode != expected_invocation_mode
-                    ):
+                    if expected_invocation_mode is not None and result.invocation_mode != expected_invocation_mode:
                         raise ValueError("executor returned a mismatched invocation_mode")
                     if (
                         executor_preflight.version is not None
@@ -808,8 +780,7 @@ def run_benchmark(
                     evaluation = evaluator.evaluate(evaluation_request)
                     if evaluation.task_id != task.execution.task_id:
                         raise ValueError(
-                            f"evaluator returned task id {evaluation.task_id!r}; "
-                            f"expected {task.execution.task_id!r}"
+                            f"evaluator returned task id {evaluation.task_id!r}; expected {task.execution.task_id!r}"
                         )
                     evaluation_payload = _evaluation_payload(evaluation)
                 except KeyboardInterrupt as exc:

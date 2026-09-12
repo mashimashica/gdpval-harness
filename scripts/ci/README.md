@@ -3,7 +3,7 @@
 These scripts are the portable execution contract shared by GitHub Actions and the internal
 NeMo CI adapter. `contract-version` contains the interface version expected by the adapter.
 
-- `lint.sh` installs the pinned pre-commit release and runs every hook against the repository.
+- `lint.sh` uses pinned uv 0.11.29/uvx to run the pinned pre-commit release against every file.
 - `core_unit_tests.sh` installs the `dev` extra and runs core tests with the `sandbox` marker
   excluded.
 - `server_tests.sh SHARD_INDEX NUM_SHARDS` installs the `dev` extra and runs one zero-based shard

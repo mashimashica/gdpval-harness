@@ -162,7 +162,7 @@ class FakeIntervention(Intervention):
         return InterventionApplication(
             application_run_id=application_run_id,
             task=TaskSpec(task.task_id, f"[OVERLAY FOR CONDITION SECRET]\n{task.prompt}"),
-                materialized_files=(
+            materialized_files=(
                 InterventionFile(
                     path="injected.txt",
                     size=7,
@@ -457,9 +457,7 @@ class GenericRunnerTests(unittest.TestCase):
             workspace_files = sorted(
                 path.relative_to(workspace).as_posix() for path in workspace.rglob("*") if path.is_file()
             )
-            workspace_contents = {
-                path: (workspace / path).read_text(encoding="utf-8") for path in workspace_files
-            }
+            workspace_contents = {path: (workspace / path).read_text(encoding="utf-8") for path in workspace_files}
             self.assertIn(skill_reference, workspace_files)
             self.assertIn(".gdpval/interventions/demo-skill-sentinel/references/guide.txt", workspace_files)
             self.assertEqual(workspace_contents[skill_reference], skill_content)
@@ -1113,42 +1111,49 @@ class GenericRunnerTests(unittest.TestCase):
             self.assertEqual(metadata["schema_version"], 4)
             self.assertIsInstance(metadata["finished_at"], str)
             self.assertTrue(metadata["finished_at"])
-            self.assertEqual(metadata["repository"], {
-                "commit": "a" * 40,
-                "revision_status": "available",
-                "worktree_status": "clean",
-            })
+            self.assertEqual(
+                metadata["repository"],
+                {
+                    "commit": "a" * 40,
+                    "revision_status": "available",
+                    "worktree_status": "clean",
+                },
+            )
             self.assertEqual(metadata["benchmark_revision_status"], "available")
             self.assertEqual(metadata["evaluator"]["preflight_details"], [])
             self.assertEqual(metadata["evaluator"]["preflight_detail_count"], 1)
-            self.assertEqual(metadata["evaluator"]["judge"], {
-                "applicable": True,
-                "executor": "judge-executor",
-                "version": "judge-version",
-                "auth_mode": "judge-auth",
-                "model": "judge-model",
-            })
+            self.assertEqual(
+                metadata["evaluator"]["judge"],
+                {
+                    "applicable": True,
+                    "executor": "judge-executor",
+                    "version": "judge-version",
+                    "auth_mode": "judge-auth",
+                    "model": "judge-model",
+                },
+            )
             self.assertEqual(metadata["judge"], metadata["evaluator"]["judge"])
-            self.assertEqual(set(metadata["executor_descriptor"]), {
-                "id", "version", "invocation_mode", "auth_mode", "model", "network_policy"
-            })
+            self.assertEqual(
+                set(metadata["executor_descriptor"]),
+                {"id", "version", "invocation_mode", "auth_mode", "model", "network_policy"},
+            )
             self.assertEqual(execution["metadata"], {})
             self.assertNotIn("output_text", execution)
             self.assertEqual(row["task_sha256"], hashlib.sha256(b"prompt-0").hexdigest())
-            self.assertEqual(summary.application_run_ids, {
-                "task-0": row["intervention"]["application_run_id"]
-            })
+            self.assertEqual(summary.application_run_ids, {"task-0": row["intervention"]["application_run_id"]})
             self.assertEqual(
                 metadata["configuration_sha256"],
                 canonical_json_sha256(metadata["configuration"]),
             )
             self.assertEqual(
                 metadata["run_fingerprint_sha256"],
-                canonical_json_sha256({
-                    "configuration_sha256": metadata["configuration_sha256"],
-                    "repository": metadata["repository"],
-                    "tasks": metadata["tasks"],
-                }),
+                canonical_json_sha256(
+                    {
+                        "configuration_sha256": metadata["configuration_sha256"],
+                        "repository": metadata["repository"],
+                        "tasks": metadata["tasks"],
+                    }
+                ),
             )
             configuration_text = json.dumps(metadata["configuration"], sort_keys=True)
             self.assertNotIn(str(out), configuration_text)
@@ -1182,13 +1187,16 @@ class GenericRunnerTests(unittest.TestCase):
             self.assertEqual(metadata["benchmark_revision_status"], "unavailable")
             self.assertIsNone(metadata["benchmark_revision"])
             self.assertEqual(metadata["configuration"]["benchmark"]["revision_status"], "unavailable")
-            self.assertEqual(metadata["judge"], {
-                "applicable": False,
-                "executor": None,
-                "version": None,
-                "auth_mode": None,
-                "model": None,
-            })
+            self.assertEqual(
+                metadata["judge"],
+                {
+                    "applicable": False,
+                    "executor": None,
+                    "version": None,
+                    "auth_mode": None,
+                    "model": None,
+                },
+            )
 
     def test_judge_applicability_is_typed_even_when_judge_details_are_unavailable(self) -> None:
         evaluator = FakeEvaluator()
@@ -1198,13 +1206,16 @@ class GenericRunnerTests(unittest.TestCase):
             run_benchmark(FakeBenchmark(task_count=1), evaluator, FakeExecutor(), out_dir=out, limit=1)
 
             metadata = json.loads((out / "run-metadata.json").read_text(encoding="utf-8"))
-            self.assertEqual(metadata["judge"], {
-                "applicable": True,
-                "executor": None,
-                "version": None,
-                "auth_mode": None,
-                "model": None,
-            })
+            self.assertEqual(
+                metadata["judge"],
+                {
+                    "applicable": True,
+                    "executor": None,
+                    "version": None,
+                    "auth_mode": None,
+                    "model": None,
+                },
+            )
 
     def test_duplicate_and_safe_task_id_collisions_fail_before_execution_or_roots(self) -> None:
         class CollisionBenchmark(FakeBenchmark):

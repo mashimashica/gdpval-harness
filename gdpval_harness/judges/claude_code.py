@@ -56,7 +56,9 @@ class ClaudeCodeJudgeExecutor(JudgeExecutor):
 
     def preflight(self, environment: Mapping[str, str] | None = None) -> JudgePreflightResult:
         sanitized = subscription_environment(environment)
-        if shutil.which(self.policy.command, path=sanitized.get("PATH")) is None and not os.path.isfile(self.policy.command):
+        if shutil.which(self.policy.command, path=sanitized.get("PATH")) is None and not os.path.isfile(
+            self.policy.command
+        ):
             return JudgePreflightResult(
                 judge_executor=self.name,
                 ok=False,

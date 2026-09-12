@@ -370,7 +370,7 @@ dev = [
     # Pre-commit: Used for pre-commit hooks.
     # Updated: Thu Sep 04, 2025 with pre-commit==4.3.0
     # License: MIT https://github.com/pre-commit/pre-commit/blob/e70b313c8017b2b6d7844e91795c9d41b9ceb9fb/LICENSE
-    "pre-commit>=3.6.0",
+    "pre-commit==4.3.0",
 
     # Mypy: Used for Python type checking.
     # Updated: Thu Sep 04, 2025 with mypy==1.17.1
@@ -378,9 +378,9 @@ dev = [
     "mypy>=1.8.0",
 
     # Ruff: Used for Python code formatting and linting.
-    # Updated: Fri Jul 25, 2025 with ruff==0.12.5
+    # Updated: Thu Aug 28, 2025 with ruff==0.12.11
     # License: MIT https://github.com/astral-sh/ruff/blob/21ac16db85452c2c196d3b9cc61fb27b7b81f3f7/LICENSE
-    "ruff",
+    "ruff==0.12.11",
 
     # Coverage: Used for Python code coverage.
     # Updated: Fri Jul 25, 2025 with coverage[toml]==7.10.0
@@ -763,9 +763,11 @@ select = [
     "F401",  # imported but unused
     "E741",  # ambiguous variable name
     "F821",  # undefined name
-    "E266",  # too many leading '#' for block comment
     "I",     # isort
 ]
+
+# E266 is preview-only in the pinned Ruff release; leave it unselected to avoid
+# changing the existing section-comment style across the upstream tree.
 
 # Additional rules can be added here
 ignore = [

@@ -310,9 +310,7 @@ class AgentSkillInterventionTests(unittest.TestCase):
                 load_agent_skill_bundle(too_long_compatibility)
 
             mismatch = self._skill(root, name="parent-name")
-            (mismatch / "SKILL.md").write_text(
-                "---\nname: other-name\ndescription: ok\n---\n", encoding="utf-8"
-            )
+            (mismatch / "SKILL.md").write_text("---\nname: other-name\ndescription: ok\n---\n", encoding="utf-8")
             with self.assertRaises(ValueError):
                 load_agent_skill_bundle(mismatch)
 

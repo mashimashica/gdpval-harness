@@ -9,14 +9,14 @@ from gdpval_harness.builders.artifact import (
     seal_generated_skill,
 )
 from gdpval_harness.builders.base import (
-    BuildFailurePhase,
-    BuildRequest,
-    BuildResult,
-    BuildStatus,
     Builder,
     BuilderInputBundle,
     BuilderInputManifest,
     BuilderPreflightResult,
+    BuildFailurePhase,
+    BuildRequest,
+    BuildResult,
+    BuildStatus,
     canonical_builder_input_manifest_bytes,
 )
 from gdpval_harness.builders.executor_skill import ExecutorSkillBuilder
@@ -27,6 +27,7 @@ from gdpval_harness.builders.inputs import (
     verify_staged_builder_inputs,
 )
 from gdpval_harness.builders.prompt import build_skill_task
+
 
 __all__ = (
     "ArtifactHandoffError",

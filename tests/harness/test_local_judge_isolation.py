@@ -90,7 +90,9 @@ esac
             out_dir = root / "out"
             for path in (candidate_a, candidate_b, out_dir):
                 path.mkdir()
-            with patch.dict(os.environ, {"TMPDIR": str(candidate_a), "TMP": str(candidate_a), "TEMP": str(candidate_a)}):
+            with patch.dict(
+                os.environ, {"TMPDIR": str(candidate_a), "TMP": str(candidate_a), "TEMP": str(candidate_a)}
+            ):
                 parent = _safe_temp_parent(candidate_a, candidate_b, out_dir)
             self.assertFalse(_paths_overlap(parent, candidate_a))
             self.assertFalse(_paths_overlap(parent, candidate_b))

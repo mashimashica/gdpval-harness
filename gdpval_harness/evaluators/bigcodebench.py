@@ -147,9 +147,7 @@ class BigCodeBenchEvaluator(Evaluator):
         required_metadata = ("test", "entry_point", "code_prompt")
         missing = [key for key in required_metadata if key not in plan.metadata]
         if missing:
-            raise ValueError(
-                "BigCodeBench evaluator requires metadata keys: " + ", ".join(missing)
-            )
+            raise ValueError("BigCodeBench evaluator requires metadata keys: " + ", ".join(missing))
 
     def preflight(self, run_dir: Path | None = None) -> EvaluatorPreflightResult:
         grader_root = self.resource_dir.resolve()

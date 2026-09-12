@@ -13,8 +13,7 @@ from gdpval_harness.executors.base import TaskSpec
 
 
 _MATH_PROMPT = (
-    "Solve the following math problem. Make sure to put the answer (and only answer) inside "
-    "\\boxed{{}}.\n\n{question}"
+    "Solve the following math problem. Make sure to put the answer (and only answer) inside \\boxed{{}}.\n\n{question}"
 )
 
 

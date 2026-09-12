@@ -204,23 +204,25 @@ class ExperimentConditionTests(unittest.TestCase):
             benchmark = _FakeLocalBenchmark()
             executor = _CapturingLocalExecutor()
             intervention = PromptOverlayIntervention(source)
-            with patch.dict(
-                os.environ,
-                {
-                    "GDPVAL_EXECUTOR": "fake-local",
-                    "GDPVAL_CONDITION": label,
-                    "GDPVAL_CONDITION_FILE": str(source),
-                    "GDPVAL_CONDITION_APPLIED": "true",
-                    "GDPVAL_WRITE_METADATA": "0",
-                    "LIMIT": "1",
-                    "OUT": str(out),
-                },
-                clear=True,
-            ), patch.object(local_runner, "_build_intervention", return_value=intervention), patch.object(
-                local_runner, "_benchmark", return_value=benchmark
-            ), patch.object(local_runner, "_executor", return_value=executor), patch.object(
-                intervention, "apply", wraps=intervention.apply
-            ) as apply:
+            with (
+                patch.dict(
+                    os.environ,
+                    {
+                        "GDPVAL_EXECUTOR": "fake-local",
+                        "GDPVAL_CONDITION": label,
+                        "GDPVAL_CONDITION_FILE": str(source),
+                        "GDPVAL_CONDITION_APPLIED": "true",
+                        "GDPVAL_WRITE_METADATA": "0",
+                        "LIMIT": "1",
+                        "OUT": str(out),
+                    },
+                    clear=True,
+                ),
+                patch.object(local_runner, "_build_intervention", return_value=intervention),
+                patch.object(local_runner, "_benchmark", return_value=benchmark),
+                patch.object(local_runner, "_executor", return_value=executor),
+                patch.object(intervention, "apply", wraps=intervention.apply) as apply,
+            ):
                 status = local_runner.run()
 
             self.assertEqual(status, 0)
@@ -260,17 +262,20 @@ class ExperimentConditionTests(unittest.TestCase):
             source.write_bytes(b"\xff")
             out = root / "run"
             executor = _CapturingLocalExecutor()
-            with patch.dict(
-                os.environ,
-                {
-                    "GDPVAL_EXECUTOR": "fake-local",
-                    "GDPVAL_CONDITION_FILE": str(source),
-                    "GDPVAL_WRITE_METADATA": "0",
-                    "LIMIT": "1",
-                    "OUT": str(out),
-                },
-                clear=True,
-            ), patch.object(local_runner, "_executor", return_value=executor):
+            with (
+                patch.dict(
+                    os.environ,
+                    {
+                        "GDPVAL_EXECUTOR": "fake-local",
+                        "GDPVAL_CONDITION_FILE": str(source),
+                        "GDPVAL_WRITE_METADATA": "0",
+                        "LIMIT": "1",
+                        "OUT": str(out),
+                    },
+                    clear=True,
+                ),
+                patch.object(local_runner, "_executor", return_value=executor),
+            ):
                 status = local_runner.run()
 
             self.assertEqual(status, 2)
@@ -293,19 +298,22 @@ class ExperimentConditionTests(unittest.TestCase):
                     return result
 
             intervention = TamperingPromptOverlay(source)
-            with patch.dict(
-                os.environ,
-                {
-                    "GDPVAL_EXECUTOR": "fake-local",
-                    "GDPVAL_CONDITION_FILE": str(source),
-                    "GDPVAL_WRITE_METADATA": "0",
-                    "LIMIT": "1",
-                    "OUT": str(out),
-                },
-                clear=True,
-            ), patch.object(local_runner, "_build_intervention", return_value=intervention), patch.object(
-                local_runner, "_benchmark", return_value=_FakeLocalBenchmark()
-            ), patch.object(local_runner, "_executor", return_value=executor):
+            with (
+                patch.dict(
+                    os.environ,
+                    {
+                        "GDPVAL_EXECUTOR": "fake-local",
+                        "GDPVAL_CONDITION_FILE": str(source),
+                        "GDPVAL_WRITE_METADATA": "0",
+                        "LIMIT": "1",
+                        "OUT": str(out),
+                    },
+                    clear=True,
+                ),
+                patch.object(local_runner, "_build_intervention", return_value=intervention),
+                patch.object(local_runner, "_benchmark", return_value=_FakeLocalBenchmark()),
+                patch.object(local_runner, "_executor", return_value=executor),
+            ):
                 status = local_runner.run()
 
             self.assertEqual(status, 1)

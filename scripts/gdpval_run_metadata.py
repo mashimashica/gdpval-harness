@@ -14,9 +14,10 @@ from pathlib import Path
 
 def git_value(*args: str) -> str | None:
     try:
-        return subprocess.check_output(
-            ["git", *args], text=True, errors="replace", stderr=subprocess.DEVNULL
-        ).strip() or None
+        return (
+            subprocess.check_output(["git", *args], text=True, errors="replace", stderr=subprocess.DEVNULL).strip()
+            or None
+        )
     except (OSError, subprocess.CalledProcessError):
         return None
 

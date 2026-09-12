@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING
 
 from gdpval_harness.evaluators.base import Evaluator, EvaluatorType
 
+
 if TYPE_CHECKING:
     from gdpval_harness.judges.base import JudgeExecutor
 

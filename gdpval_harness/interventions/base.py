@@ -84,10 +84,7 @@ def _manifest_payload(
         "intervention_type": intervention_type.value,
         "source_revision": source_revision,
         "revision_status": revision_status,
-        "files": [
-            {"path": item.path, "size": item.size, "sha256": item.sha256}
-            for item in files
-        ],
+        "files": [{"path": item.path, "size": item.size, "sha256": item.sha256} for item in files],
         "bundle_sha256": bundle_sha256,
         "application": {"method": application.method, "target": application.target},
     }

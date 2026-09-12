@@ -122,7 +122,12 @@ class CodexExecutor(Executor):
                 version=version,
                 details=(auth_text or "Codex is not logged in",),
             )
-        if "api key" in normalized or "api-key" in normalized or "apikey" in normalized or "access token" in normalized:
+        if (
+            "api key" in normalized
+            or "api-key" in normalized
+            or "apikey" in normalized
+            or "access token" in normalized
+        ):
             return PreflightResult(
                 executor=self.name,
                 ok=False,
