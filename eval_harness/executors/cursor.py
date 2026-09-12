@@ -12,7 +12,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Mapping
 
-from eval_harness.capabilities import ExecutorOutput
+from eval_harness.capabilities import ExecutorCapabilities, ExecutorInput, ExecutorOutput
 from eval_harness.executors.base import (
     ExecutionRequest,
     ExecutionResult,
@@ -66,6 +66,10 @@ class CursorExecutor(Executor):
     name = "cursor"
     invocation_mode = "agent -p"
     tool_permission_mode = "project allowlist + Cursor sandbox"
+    capabilities = ExecutorCapabilities(
+        inputs=frozenset({ExecutorInput.PROMPT_TEXT, ExecutorInput.WORKSPACE_FILES}),
+        outputs=frozenset({ExecutorOutput.ARTIFACT_FILES}),
+    )
 
     def __init__(self, *, network_enabled: bool = False, command: str | None = None) -> None:
         self.network_enabled = network_enabled

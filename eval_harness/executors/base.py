@@ -9,7 +9,7 @@ from enum import StrEnum
 from pathlib import Path
 from typing import Mapping, Sequence
 
-from eval_harness.capabilities import ExecutorOutput
+from eval_harness.capabilities import ExecutorCapabilities, ExecutorOutput
 from eval_harness.failures import Failure, FailureImpact
 from eval_harness.reasoning import ReasoningEffortOption, validate_reasoning_effort
 
@@ -109,6 +109,7 @@ class Executor(ABC):
 
     name: str
     invocation_mode: str
+    capabilities: ExecutorCapabilities
 
     @abstractmethod
     def preflight(self) -> PreflightResult:

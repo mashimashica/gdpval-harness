@@ -15,6 +15,9 @@ from eval_harness.capabilities import (
     preflight_capabilities,
 )
 from eval_harness.executors.base import ExecutionResult, ExecutionStatus
+from eval_harness.executors.claude_code import ClaudeCodeExecutor
+from eval_harness.executors.codex import CodexExecutor
+from eval_harness.executors.cursor import CursorExecutor
 from eval_harness.failures import Failure, FailureImpact, FailureKind, RunAbort
 
 
@@ -81,6 +84,21 @@ class ExecutionCapabilitiesTests(unittest.TestCase):
         empty_result = preflight_capabilities(empty_requirements, empty_capabilities)
         self.assertFalse(empty_result.missing_inputs)
         self.assertTrue(empty_result.ok)
+
+    def test_current_adapters_declare_explicit_capabilities(self) -> None:
+        expected_inputs = frozenset({ExecutorInput.PROMPT_TEXT, ExecutorInput.WORKSPACE_FILES})
+        self.assertEqual(
+            CodexExecutor.capabilities.inputs,
+            expected_inputs,
+        )
+        self.assertEqual(
+            CodexExecutor.capabilities.outputs,
+            frozenset({ExecutorOutput.FINAL_TEXT, ExecutorOutput.ARTIFACT_FILES}),
+        )
+        for executor in (ClaudeCodeExecutor, CursorExecutor):
+            with self.subTest(executor=executor.__name__):
+                self.assertEqual(executor.capabilities.inputs, expected_inputs)
+                self.assertEqual(executor.capabilities.outputs, frozenset({ExecutorOutput.ARTIFACT_FILES}))
 
     def test_unknown_capability_and_wrong_contract_types_fail_closed(self) -> None:
         empty_requirements = ExecutionRequirements(inputs=frozenset(), outputs=frozenset())

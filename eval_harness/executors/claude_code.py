@@ -10,7 +10,7 @@ import subprocess
 from datetime import datetime, timezone
 from typing import Mapping
 
-from eval_harness.capabilities import ExecutorOutput
+from eval_harness.capabilities import ExecutorCapabilities, ExecutorInput, ExecutorOutput
 from eval_harness.executors.base import (
     ExecutionRequest,
     ExecutionResult,
@@ -57,6 +57,10 @@ class ClaudeCodeExecutor(Executor):
     name = "claude-code"
     invocation_mode = "claude -p"
     tool_permission_mode = "acceptEdits + restricted built-in tools + fail-closed Bash sandbox"
+    capabilities = ExecutorCapabilities(
+        inputs=frozenset({ExecutorInput.PROMPT_TEXT, ExecutorInput.WORKSPACE_FILES}),
+        outputs=frozenset({ExecutorOutput.ARTIFACT_FILES}),
+    )
 
     def __init__(
         self,
