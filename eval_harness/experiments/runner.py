@@ -41,6 +41,7 @@ from eval_harness.experiments.base import (
     LoadedExperimentProfile,
 )
 from eval_harness.experiments.profile import load_experiment_inputs
+from eval_harness.failures import FailureKind, RunAbort
 from eval_harness.interventions.agent_skill import AgentSkillIntervention
 from eval_harness.interventions.base import InterventionBundle
 from eval_harness.layout import task_layout
@@ -1065,6 +1066,19 @@ def run_builder_experiment(
                 row["application"] = _application_payload(item, "interrupted")
                 _persist_metadata(metadata_path, metadata, status="interrupted", completed=completed, finished=True)
                 raise
+            except RunAbort as exc:
+                application_status = (
+                    "interrupted" if exc.failure.kind is FailureKind.INTERRUPTED else "failed"
+                )
+                row["application"] = _application_payload(item, application_status)
+                _persist_metadata(
+                    metadata_path,
+                    metadata,
+                    status=application_status,
+                    completed=completed,
+                    finished=True,
+                )
+                raise
             except Exception:
                 row["application"] = _application_payload(item, "failed")
                 _persist_metadata(metadata_path, metadata, status="failed", completed=completed, finished=True)
@@ -1098,6 +1112,10 @@ def run_builder_experiment(
             row["application"] = _application_payload(item, "completed", application_run_id)
             completed += 1
             _persist_metadata(metadata_path, metadata, status="running", completed=completed, finished=False)
+    except RunAbort as exc:
+        final_status = "interrupted" if exc.failure.kind is FailureKind.INTERRUPTED else "failed"
+        _persist_metadata(metadata_path, metadata, status=final_status, completed=completed, finished=True)
+        raise
     except KeyboardInterrupt:
         final_status = "interrupted"
         _persist_metadata(metadata_path, metadata, status=final_status, completed=completed, finished=True)

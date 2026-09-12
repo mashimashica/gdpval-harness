@@ -45,7 +45,6 @@ from eval_harness.provenance import (
 from eval_harness.reasoning import ReasoningEffortOption, validate_executor_reasoning_effort
 
 
-_SUCCESS_STATUSES = {ExecutionStatus.COMPLETED, ExecutionStatus.NO_DELIVERABLE}
 _LEGACY_CONDITION_ENVIRONMENT_KEYS = frozenset(
     {"GDPVAL_CONDITION", "GDPVAL_CONDITION_FILE", "GDPVAL_CONDITION_APPLIED"}
 )
@@ -820,9 +819,6 @@ def run_benchmark(
 
                 persist_row(evaluation_payload)
 
-                if result.status not in _SUCCESS_STATUSES:
-                    run_status = "failed"
-                    break
     except RunAbort as exc:
         if exc.failure.kind is FailureKind.INTERRUPTED:
             run_status = "interrupted"

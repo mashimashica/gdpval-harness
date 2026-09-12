@@ -43,6 +43,7 @@ from eval_harness.experiments.base import (
     LoadedExperimentProfile,
 )
 from eval_harness.experiments.runner import run_builder_experiment
+from eval_harness.failures import RunAbort
 from eval_harness.judges.base import JudgeRequest
 from eval_harness.judges.codex import CodexJudgeExecutor
 from eval_harness.local_runner import _validate_resume_condition
@@ -453,15 +454,16 @@ class ReasoningEffortContractTests(unittest.TestCase):
                 ),
                 patch("eval_harness.executors.codex.subprocess.run", side_effect=fake_run),
             ):
-                summary = run_benchmark(
-                    _FakeBenchmark(task_count=2),
-                    _FakeEvaluator(),
-                    executor,
-                    out_dir=root / "run",
-                    limit=2,
-                )
+                with self.assertRaises(RunAbort) as raised:
+                    run_benchmark(
+                        _FakeBenchmark(task_count=2),
+                        _FakeEvaluator(),
+                        executor,
+                        out_dir=root / "run",
+                        limit=2,
+                    )
 
-            self.assertEqual(summary.status, "failed")
+            self.assertEqual(str(raised.exception), "process_exit")
             self.assertEqual(len(calls), 1)
             self._assert_one_effort_pair(calls[0], None)
             self.assertIn(["-c", 'model_reasoning_effort="max"'], _pairs(calls[0]))
@@ -517,20 +519,20 @@ class ReasoningEffortContractTests(unittest.TestCase):
                 ),
                 patch("eval_harness.executors.codex.subprocess.run", side_effect=fake_run),
             ):
-                summary = run_builder_experiment(
-                    profile,
-                    config,
-                    benchmark,
-                    evaluator,
-                    builder,
-                    application,
-                    source_roots={"input-guide": root / "input-source"},
-                    out_dir=root / "output",
-                    runtime_root=root / "runtime",
-                )
+                with self.assertRaises(RunAbort) as raised:
+                    run_builder_experiment(
+                        profile,
+                        config,
+                        benchmark,
+                        evaluator,
+                        builder,
+                        application,
+                        source_roots={"input-guide": root / "input-source"},
+                        out_dir=root / "output",
+                        runtime_root=root / "runtime",
+                    )
 
-            self.assertEqual(summary.status, "failed")
-            self.assertEqual(summary.completed_applications, 0)
+            self.assertEqual(str(raised.exception), "process_exit")
             self.assertEqual(len(calls), 1)
             self.assertIn(["-c", 'model_reasoning_effort="max"'], _pairs(calls[0]))
             self.assertNotIn("xhigh", calls[0])
@@ -558,6 +560,11 @@ class ReasoningEffortContractTests(unittest.TestCase):
             application_execution = _json_object(application_row["execution"])
             self.assertEqual(application_execution["reasoning_effort_requested"], "max")
             self.assertEqual(application_execution["exit_code"], 2)
+            self.assertEqual(application_row["evaluation"]["status"], "skipped")
+            self.assertEqual(
+                application_execution["failure"],
+                {"kind": "process", "code": "process_exit", "impact": "run"},
+            )
             second_entry = _json_object(entries[1])
             self.assertIsNone(second_entry["application"])
 
