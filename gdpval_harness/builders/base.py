@@ -346,7 +346,7 @@ class BuildResult:
                 if status not in {BuildStatus.FAILED, BuildStatus.TIMED_OUT, BuildStatus.INTERRUPTED}:
                     raise ValueError("execution phase requires failed, timed-out, or interrupted build status")
                 try:
-                    execution_status = None if execution is None else ExecutionStatus(execution.status)
+                    phase_execution_status = None if execution is None else ExecutionStatus(execution.status)
                 except (TypeError, ValueError) as exc:
                     raise ValueError("execution phase requires a valid execution status") from exc
                 expected_execution_status = {
@@ -355,8 +355,8 @@ class BuildResult:
                 }.get(status)
                 if (
                     expected_execution_status is not None
-                    and execution_status is not None
-                    and execution_status is not expected_execution_status
+                    and phase_execution_status is not None
+                    and phase_execution_status is not expected_execution_status
                 ):
                     raise ValueError("execution status does not match build status")
             elif failure_phase is BuildFailurePhase.ARTIFACT_VALIDATION:

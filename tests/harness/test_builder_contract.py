@@ -8,6 +8,7 @@ import inspect
 import unittest
 from dataclasses import FrozenInstanceError
 from pathlib import Path
+from typing import Protocol, Sequence, cast
 
 from gdpval_harness.builders import (
     Builder,
@@ -31,6 +32,19 @@ from gdpval_harness.interventions.base import (
 
 
 _DIGEST = "a" * 64
+
+
+class _BuildRequestConstructor(Protocol):
+    def __call__(
+        self,
+        build_run_id: str,
+        task: TaskSpec,
+        inputs: Sequence[BuilderInputBundle],
+        runtime_root: Path,
+        artifact_root: Path,
+        **unexpected: object,
+    ) -> BuildRequest:
+        raise NotImplementedError
 
 
 class BuilderContractTests(unittest.TestCase):
@@ -129,7 +143,7 @@ class BuilderContractTests(unittest.TestCase):
         manifest = self.manifest()
         self.assertIsInstance(manifest.files, tuple)
         with self.assertRaises(FrozenInstanceError):
-            manifest.input_id = "changed"  # type: ignore[misc]
+            setattr(manifest, "input_id", "changed")
 
     def test_manifest_hash_is_canonical_and_excludes_source_root_and_self(self) -> None:
         manifest = self.manifest()
@@ -177,7 +191,15 @@ class BuilderContractTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             BuilderInputManifest("input", "files", None, "unavailable", (), _DIGEST)
         with self.assertRaises(TypeError):
-            BuilderInputManifest("input", "files", None, "unavailable", (object(),), _DIGEST)  # type: ignore[arg-type]
+            # Preserve the invalid runtime file record at the manifest boundary.
+            BuilderInputManifest(
+                "input",
+                "files",
+                None,
+                "unavailable",
+                cast(tuple[InterventionFile, ...], (object(),)),
+                _DIGEST,
+            )
 
     def test_request_normalizes_paths_and_inputs_and_rejects_bad_shape(self) -> None:
         manifest = self.manifest()
@@ -185,8 +207,8 @@ class BuilderContractTests(unittest.TestCase):
             "build-1",
             TaskSpec("task-1", "prompt"),
             [self.bundle(manifest)],
-            "/runtime",
-            "/artifacts",
+            Path("/runtime"),
+            Path("/artifacts"),
             timeout_seconds=1.5,
         )
         self.assertIsInstance(request.inputs, tuple)
@@ -195,41 +217,70 @@ class BuilderContractTests(unittest.TestCase):
         self.assertIs(request.task, request.task)
 
         with self.assertRaises(ValueError):
-            BuildRequest("", TaskSpec("task-1", "prompt"), (), "/runtime", "/artifacts")
+            BuildRequest("", TaskSpec("task-1", "prompt"), (), Path("/runtime"), Path("/artifacts"))
         with self.assertRaises(TypeError):
-            BuildRequest("build-1", object(), (), "/runtime", "/artifacts")  # type: ignore[arg-type]
+            # Preserve the invalid runtime task object at the request boundary.
+            BuildRequest(
+                "build-1",
+                cast(TaskSpec, object()),
+                (),
+                Path("/runtime"),
+                Path("/artifacts"),
+            )
         with self.assertRaises(TypeError):
-            BuildRequest("build-1", TaskSpec("task-1", "prompt"), (object(),), "/runtime", "/artifacts")  # type: ignore[arg-type]
+            BuildRequest(
+                "build-1",
+                TaskSpec("task-1", "prompt"),
+                cast(tuple[BuilderInputBundle, ...], (object(),)),
+                Path("/runtime"),
+                Path("/artifacts"),
+            )
         with self.assertRaises(ValueError):
             BuildRequest(
                 "build-1",
                 TaskSpec("task-1", "prompt"),
                 (self.bundle(manifest), self.bundle(manifest)),
-                "/runtime",
-                "/artifacts",
+                Path("/runtime"),
+                Path("/artifacts"),
             )
         for timeout in (0, -1, float("nan"), float("inf")):
             with self.subTest(timeout=timeout), self.assertRaises(ValueError):
                 BuildRequest(
-                    "build-1", TaskSpec("task-1", "prompt"), (), "/runtime", "/artifacts", timeout_seconds=timeout
+                    "build-1",
+                    TaskSpec("task-1", "prompt"),
+                    (),
+                    Path("/runtime"),
+                    Path("/artifacts"),
+                    timeout_seconds=timeout,
                 )
-        with self.assertRaises(TypeError):
-            BuildRequest("build-1", TaskSpec("task-1", "prompt"), (), "/runtime", "/artifacts", timeout_seconds="10")  # type: ignore[arg-type]
         with self.assertRaises(TypeError):
             BuildRequest(
                 "build-1",
                 TaskSpec("task-1", "prompt"),
                 (),
-                "/runtime",
-                "/artifacts",
-                source_root=Path("/forbidden"),  # type: ignore[call-arg]
+                Path("/runtime"),
+                Path("/artifacts"),
+                # Preserve the invalid runtime timeout at the request boundary.
+                timeout_seconds=cast(float, "10"),
+            )
+        with self.assertRaises(TypeError):
+            # Exercise rejection of an unexpected constructor keyword.
+            constructor = cast(_BuildRequestConstructor, BuildRequest)
+            constructor(
+                "build-1",
+                TaskSpec("task-1", "prompt"),
+                (),
+                Path("/runtime"),
+                Path("/artifacts"),
+                source_root=Path("/forbidden"),
             )
 
     def test_preflight_requires_name_and_freezes_string_details(self) -> None:
         result = BuilderPreflightResult(
             "builder",
             True,
-            details=["ready", 3],
+            # Preserve the runtime coercion fixture for non-string detail values.
+            details=cast(tuple[str, ...], ["ready", 3]),
             builder_executor_invocation_mode="subscription",
         )
         self.assertEqual(result.details, ("ready", "3"))
@@ -243,14 +294,17 @@ class BuilderContractTests(unittest.TestCase):
                 BuilderPreflightResult(
                     "builder",
                     True,
-                    builder_executor_invocation_mode=invocation_mode,  # type: ignore[arg-type]
+                    # Preserve the invalid runtime invocation mode at the contract boundary.
+                    builder_executor_invocation_mode=cast(str, invocation_mode),
                 )
 
     def test_build_result_success_and_failure_invariants(self) -> None:
         manifest = self.manifest()
         execution = self.execution()
         intervention = self.intervention_bundle()
-        success = BuildResult("build-1", "task-1", "builder", "completed", [manifest], execution, intervention)
+        success = BuildResult(
+            "build-1", "task-1", "builder", BuildStatus.COMPLETED, [manifest], execution, intervention
+        )
         self.assertEqual(success.status, BuildStatus.COMPLETED)
         self.assertIsInstance(success.inputs, tuple)
         self.assertTrue(success.executor_invoked)
@@ -316,8 +370,15 @@ class BuilderContractTests(unittest.TestCase):
             )
         with self.assertRaises(TypeError):
             BuildResult(
-                "build-1", "task-1", "builder", BuildStatus.FAILED, [object()], None, None, BuildFailurePhase.PREFLIGHT
-            )  # type: ignore[list-item]
+                "build-1",
+                "task-1",
+                "builder",
+                BuildStatus.FAILED,
+                cast(tuple[BuilderInputManifest, ...], (object(),)),
+                None,
+                None,
+                BuildFailurePhase.PREFLIGHT,
+            )
 
     def test_phase_status_and_execution_mappings_fail_closed(self) -> None:
         manifest = self.manifest()

@@ -421,6 +421,8 @@ class AgentSkillIntervention(Intervention):
         _validate_destination_collisions(workspace, logical_paths)
         ensure_destination_parents(workspace, logical_paths)
 
+        if not isinstance(bundle.root, Path):
+            raise RuntimeError("Agent Skill source bundle has no filesystem root")
         entries = _source_entries_from_manifest(bundle.manifest, bundle.root)
         created_files: list[Path] = []
         created_dirs: list[Path] = []

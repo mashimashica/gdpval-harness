@@ -66,7 +66,7 @@ def _parse_reasoning_effort() -> ReasoningEffortOption:
     return validate_executor_reasoning_effort("codex", raw)
 
 
-def _executor(name: str):
+def _executor(name: str) -> CodexExecutor | ClaudeCodeExecutor | CursorExecutor:
     network_enabled = os.getenv("GDPVAL_EXECUTOR_NETWORK", "disabled") == "enabled"
     reasoning_effort = _parse_reasoning_effort()
     validate_executor_reasoning_effort(name, reasoning_effort)
@@ -422,6 +422,16 @@ def _intervention_payload(intervention: Intervention) -> tuple[bool, dict[str, o
     }
 
 
+def _validated_details(payload: dict[str, object]) -> list[str]:
+    raw_details = payload.get("details")
+    if not isinstance(raw_details, list):
+        raise TypeError("preflight details must be a list")
+    details = [item for item in raw_details if isinstance(item, str)]
+    if len(details) != len(raw_details):
+        raise TypeError("preflight details must contain strings")
+    return details
+
+
 def preflight(
     executor_name: str,
     out_dir: Path,
@@ -449,7 +459,7 @@ def preflight(
             "ok": False,
             "version": None,
             "auth_mode": None,
-            "details": list(intervention_details["details"]),
+            "details": _validated_details(intervention_details),
             "intervention": intervention_details,
         }
 
@@ -546,7 +556,7 @@ def run() -> int:
     out_dir = Path(os.getenv("OUT", "./results/gdpval")).resolve()
     intervention = _build_intervention()
     ok, preflight_payload = preflight(executor_name, out_dir, for_run=True, intervention=intervention)
-    for detail in preflight_payload["details"]:
+    for detail in _validated_details(preflight_payload):
         print(f"gdpval[{executor_name}]: {detail}", file=sys.stderr)
     if not ok:
         print(f"gdpval[{executor_name}]: preflight failed", file=sys.stderr)

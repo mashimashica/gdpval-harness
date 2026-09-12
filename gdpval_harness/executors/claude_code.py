@@ -65,7 +65,10 @@ class ClaudeCodeExecutor(Executor):
     ) -> None:
         self.network_enabled = network_enabled
         self.max_turns = max_turns
-        self.command = command or os.getenv("GDPVAL_CLAUDE_COMMAND", "claude")
+        resolved_command = command or os.getenv("GDPVAL_CLAUDE_COMMAND", "claude")
+        if resolved_command is None:
+            raise RuntimeError("Claude Code command could not be resolved")
+        self.command = resolved_command
         self._version: str | None = None
 
     def version(self) -> str | None:

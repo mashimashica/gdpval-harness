@@ -12,7 +12,9 @@ from unittest.mock import patch
 from gdpval_harness.benchmarks.base import Benchmark, BenchmarkTask
 from gdpval_harness.builders.base import (
     Builder,
+    BuilderInputBundle,
     BuilderPreflightResult,
+    BuildFailurePhase,
     BuildRequest,
     BuildResult,
     BuildStatus,
@@ -40,6 +42,7 @@ from gdpval_harness.experiments.base import (
     ExperimentInputSpec,
     ExperimentProfile,
     ExperimentRunConfig,
+    ExperimentRunSummary,
     LoadedExperimentProfile,
 )
 from gdpval_harness.experiments.runner import _make_schedule, _validate_build_result, run_builder_experiment
@@ -194,7 +197,7 @@ class _Builder(Builder):
                 builder=self.name,
                 status=BuildStatus.FAILED,
                 inputs=tuple(item.manifest for item in request.inputs),
-                failure_phase="execution",
+                failure_phase=BuildFailurePhase.EXECUTION,
             )
 
         skill = request.artifact_root / "generic-skill"
@@ -245,7 +248,15 @@ class BuilderExperimentRunnerTests(unittest.TestCase):
         fail_plan_at: int | None = None,
         input_content: str = "allowlisted input",
         order_seed: int = 19,
-    ):
+    ) -> tuple[
+        LoadedExperimentProfile,
+        ExperimentRunConfig,
+        _Benchmark,
+        _Evaluator,
+        _Builder,
+        _ApplicationExecutor,
+        BuilderInputBundle,
+    ]:
         source = root / "input-source"
         source.mkdir()
         (source / "guide.txt").write_text(input_content, encoding="utf-8")
@@ -303,10 +314,26 @@ class BuilderExperimentRunnerTests(unittest.TestCase):
         schedule_ids: list[str] | None = None,
         application_ids: list[str] | None = None,
         task_prompt_suffix: str = "",
-        **kwargs: object,
-    ):
+        task_count: int = 2,
+        fail_plan_at: int | None = None,
+        input_content: str = "allowlisted input",
+        order_seed: int = 19,
+    ) -> tuple[
+        ExperimentRunSummary,
+        _Benchmark,
+        _Evaluator,
+        _Builder,
+        _ApplicationExecutor,
+        BuilderInputBundle,
+    ]:
         root.mkdir(parents=True, exist_ok=True)
-        profile, config, benchmark, evaluator, builder, application, source_bundle = self._fixture(root, **kwargs)
+        profile, config, benchmark, evaluator, builder, application, source_bundle = self._fixture(
+            root,
+            task_count=task_count,
+            fail_plan_at=fail_plan_at,
+            input_content=input_content,
+            order_seed=order_seed,
+        )
         if task_prompt_suffix:
             benchmark.tasks = tuple(
                 BenchmarkTask(

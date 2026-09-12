@@ -10,6 +10,7 @@ import tempfile
 import unittest
 from dataclasses import replace
 from pathlib import Path
+from typing import cast
 from unittest.mock import patch
 
 import gdpval_harness.interventions.agent_skill as agent_skill_module
@@ -82,7 +83,8 @@ class AgentSkillInterventionTests(unittest.TestCase):
             self.assertTrue(from_source.preflight().ok)
             for invalid_reference in (" ", "bad\x00reference", 3):
                 with self.assertRaises(ValueError):
-                    AgentSkillIntervention(bundle, source_reference=invalid_reference)  # type: ignore[arg-type]
+                    # Preserve the invalid runtime source reference at the constructor boundary.
+                    AgentSkillIntervention(bundle, source_reference=cast(str, invalid_reference))
 
     def test_registry_uses_agent_skill_source_route(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

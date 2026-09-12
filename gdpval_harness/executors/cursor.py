@@ -67,7 +67,10 @@ class CursorExecutor(Executor):
 
     def __init__(self, *, network_enabled: bool = False, command: str | None = None) -> None:
         self.network_enabled = network_enabled
-        self.command = command or os.getenv("GDPVAL_CURSOR_COMMAND", "agent")
+        resolved_command = command or os.getenv("GDPVAL_CURSOR_COMMAND", "agent")
+        if resolved_command is None:
+            raise RuntimeError("Cursor Agent command could not be resolved")
+        self.command = resolved_command
         self._version: str | None = None
 
     def version(self) -> str | None:

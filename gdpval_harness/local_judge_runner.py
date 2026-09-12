@@ -11,8 +11,9 @@ import subprocess
 import sys
 import tempfile
 from pathlib import Path
+from typing import TypedDict
 
-from gdpval_harness.judges.base import JudgeRequest, Verdict
+from gdpval_harness.judges.base import JudgeExecutor, JudgeRequest, Verdict
 from gdpval_harness.judges.claude_code import ClaudeCodeJudgeExecutor
 from gdpval_harness.judges.codex import CodexJudgeExecutor
 from gdpval_harness.judges.pairwise import (
@@ -76,6 +77,15 @@ _JUDGE_ENV_ALLOWLIST = {
 }
 
 
+class _PreflightRecord(TypedDict):
+    judge_executor: str
+    ok: bool
+    version: str | None
+    auth_mode: str | None
+    details: list[str]
+    temp_parent: str | None
+
+
 def _truthy(name: str) -> bool:
     return os.getenv(name, "").lower() not in {"", "0", "false", "no"}
 
@@ -96,7 +106,7 @@ def _parse_reasoning_effort() -> ReasoningEffortOption:
     return validate_executor_reasoning_effort("codex", raw)
 
 
-def _judge_executor(name: str):
+def _judge_executor(name: str) -> JudgeExecutor:
     reasoning_effort = _parse_reasoning_effort()
     validate_executor_reasoning_effort(name, reasoning_effort)
     if name == "codex":
@@ -112,6 +122,7 @@ def _positive_int(name: str, default: int | None = None) -> int:
         if default is None:
             raise ValueError(f"{name} is required")
         return default
+    assert raw is not None
     try:
         value = int(raw)
     except ValueError as exc:
@@ -125,6 +136,7 @@ def _positive_float(name: str, default: float) -> float:
     raw = os.getenv(name)
     if raw in {None, ""}:
         return default
+    assert raw is not None
     try:
         value = float(raw)
     except ValueError as exc:
@@ -138,6 +150,7 @@ def _integer(name: str, default: int) -> int:
     raw = os.getenv(name)
     if raw in {None, ""}:
         return default
+    assert raw is not None
     try:
         return int(raw)
     except ValueError as exc:
@@ -179,9 +192,17 @@ def _read_run_metadata(deliverables: Path) -> dict[str, object] | None:
     if not path.is_file():
         return None
     try:
-        return json.loads(path.read_text(encoding="utf-8"))
+        payload: object = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         return None
+    if not isinstance(payload, dict):
+        return None
+    metadata: dict[str, object] = {}
+    for key, value in payload.items():
+        if not isinstance(key, str):
+            return None
+        metadata[key] = value
+    return metadata
 
 
 def _generator_info(deliverables: Path) -> dict[str, object]:
@@ -189,12 +210,12 @@ def _generator_info(deliverables: Path) -> dict[str, object]:
     config = metadata.get("configuration") if isinstance(metadata, dict) else {}
     if not isinstance(config, dict):
         config = {}
+    repository = metadata.get("repository")
+    commit = repository.get("commit") if isinstance(repository, dict) else None
     return {
         "executor": config.get("executor"),
         "model": config.get("model"),
-        "repository_commit": (metadata.get("repository") or {}).get("commit")
-        if isinstance(metadata.get("repository"), dict)
-        else None,
+        "repository_commit": commit,
     }
 
 
@@ -292,7 +313,7 @@ def _safe_temp_parent(candidate_a: Path, candidate_b: Path, out_dir: Path) -> Pa
     raise RuntimeError("no writable system temporary directory is disjoint from both candidates and --out")
 
 
-def _preflight(for_run: bool) -> tuple[bool, dict[str, object]]:
+def _preflight(for_run: bool) -> tuple[bool, _PreflightRecord]:
     judge_name = os.getenv("GDPVAL_JUDGE_EXECUTOR", "")
     details: list[str] = []
     ok = True
@@ -309,6 +330,7 @@ def _preflight(for_run: bool) -> tuple[bool, dict[str, object]]:
             "ok": False,
             "version": None,
             "auth_mode": None,
+            "temp_parent": None,
             "details": [str(exc)],
         }
 
@@ -378,7 +400,7 @@ def _preflight(for_run: bool) -> tuple[bool, dict[str, object]]:
     }
 
 
-def _write_run_metadata(out_dir: Path, preflight: dict[str, object]) -> None:
+def _write_run_metadata(out_dir: Path, preflight: _PreflightRecord) -> None:
     env = os.environ.copy()
     env["OUT"] = str(out_dir)
     env["GDPVAL_JUDGE_EXECUTOR_VERSION"] = str(preflight.get("version") or "")
@@ -398,9 +420,7 @@ def _persist_executor_logs(
     write_trial_metadata(target / "metadata.json", row)
 
 
-def _interrupted_row(
-    task_key: str, trial_index: int, swapped: bool, preflight: dict[str, object]
-) -> dict[str, object]:
+def _interrupted_row(task_key: str, trial_index: int, swapped: bool, preflight: _PreflightRecord) -> dict[str, object]:
     row = {
         "task_id": task_key.removeprefix("task_"),
         "trial_index": trial_index,

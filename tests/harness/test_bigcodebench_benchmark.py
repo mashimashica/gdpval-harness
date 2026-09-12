@@ -193,11 +193,14 @@ class BigCodeBenchBenchmarkTests(unittest.TestCase):
                 "code_prompt": "def solve():",
             }
 
-            def fake_run(command, **kwargs):
+            def fake_run(
+                command: list[str], *, cwd: Path, errors: str, input: str, **kwargs: object
+            ) -> subprocess.CompletedProcess[str]:
+                del kwargs
                 self.assertEqual(command, [str(venv_python), str(runner)])
-                self.assertEqual(kwargs["cwd"], resource_dir)
-                self.assertEqual(kwargs["errors"], "replace")
-                payload = json.loads(kwargs["input"])
+                self.assertEqual(cwd, resource_dir)
+                self.assertEqual(errors, "replace")
+                payload = json.loads(input)
                 self.assertEqual(payload["code"], "def solve():\n    pass\nreturn 42")
                 self.assertEqual(payload["test_code"], "test-code")
                 self.assertEqual(payload["entry_point"], "solve")

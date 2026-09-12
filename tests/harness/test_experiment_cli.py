@@ -7,11 +7,13 @@ import contextlib
 import io
 import json
 import unittest
+from argparse import _SubParsersAction
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock, call, patch
 
 import gdpval_harness.cli as cli
+from gdpval_harness.experiments.base import ExperimentRunConfig
 
 
 class ExperimentCLIHelpers:
@@ -128,7 +130,7 @@ class ExperimentCLIParsingTests(unittest.TestCase):
             config = runner_args[1]
             self.assertEqual(
                 config,
-                cli.ExperimentRunConfig(
+                ExperimentRunConfig(
                     builder_executor="builder-a",
                     application_executor="application-a",
                     evaluator="evaluator-a",
@@ -254,7 +256,13 @@ class ExperimentCLIParsingTests(unittest.TestCase):
 
     def test_generic_experiment_help_has_required_controls(self) -> None:
         parser = cli._parser()
-        experiment_parser = parser._subparsers._group_actions[0].choices["experiment"]
+        subparser_group = parser._subparsers
+        assert subparser_group is not None
+        subparser_actions = subparser_group._group_actions
+        assert subparser_actions
+        subparsers = subparser_actions[0]
+        assert isinstance(subparsers, _SubParsersAction)
+        experiment_parser = subparsers.choices["experiment"]
         rendered = experiment_parser.format_help()
         flags = ("--input-root", "--limit", "--order-seed", "--out", "--runtime-root", "--builder-executor")
         for flag in flags:

@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import unittest
+from typing import cast
 
 from gdpval_harness.builders.prompt import build_skill_task
 from gdpval_harness.executors.base import TaskSpec
@@ -75,11 +76,13 @@ class BuilderPromptTests(unittest.TestCase):
 
     def test_rejects_invalid_task_and_target_types(self) -> None:
         with self.assertRaises(TypeError):
-            build_skill_task(object(), ())  # type: ignore[arg-type]
+            # Preserve the invalid runtime task object at the prompt boundary.
+            build_skill_task(cast(TaskSpec, object()), ())
         with self.assertRaises(TypeError):
             build_skill_task(TaskSpec("task", "prompt"), "reference_files/builder-inputs/input-001")
         with self.assertRaises(TypeError):
-            build_skill_task(TaskSpec("task", "prompt"), (None,))  # type: ignore[tuple-item]
+            # Preserve the invalid runtime target at the prompt boundary.
+            build_skill_task(TaskSpec("task", "prompt"), cast(tuple[str, ...], (None,)))
 
 
 if __name__ == "__main__":

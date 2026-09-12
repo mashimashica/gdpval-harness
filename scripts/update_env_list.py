@@ -35,6 +35,13 @@ RESPONSES_API_AGENTS_FOLDER = Path("responses_api_agents")
 BENCHMARKS_FOLDER = Path("benchmarks")
 
 
+def _as_mapping(value: object) -> dict[str, object]:
+    """Return a YAML mapping with string keys, or an empty mapping otherwise."""
+    if not isinstance(value, dict):
+        return {}
+    return {key: item for key, item in value.items() if isinstance(key, str)}
+
+
 @dataclass
 class AgentDatasetsMetadata:
     """Metadata extracted from agent datasets configuration."""
@@ -148,52 +155,60 @@ class ServerInfo:
         return f"<a href='{self.readme_path}'>README</a>"
 
 
-def visit_agent_datasets(data: dict) -> AgentDatasetsMetadata:  # pragma: no cover
+def visit_agent_datasets(data: object) -> AgentDatasetsMetadata:  # pragma: no cover
     agent = AgentDatasetsMetadata()
-    if not isinstance(data, dict):
-        return agent
-    for v1 in data.values():
-        if not isinstance(v1, dict):
+    for v1_value in _as_mapping(data).values():
+        v1 = _as_mapping(v1_value)
+        if not v1:
             continue
-        v2 = v1.get("responses_api_agents")
-        if not isinstance(v2, dict):
+        v2 = _as_mapping(v1.get("responses_api_agents"))
+        if not v2:
             continue
-        for v3 in v2.values():
-            if not isinstance(v3, dict):
+        for v3_value in v2.values():
+            v3 = _as_mapping(v3_value)
+            if not v3:
                 continue
             datasets = v3.get("datasets")
             if isinstance(datasets, list):
-                for entry in datasets:
-                    if isinstance(entry, dict):
-                        agent.types.append(entry.get("type"))
-                        if entry.get("type") == "train":
-                            agent.license = entry.get("license")
-                            source = entry.get("source")
-                            if isinstance(source, dict) and source.get("type") == "huggingface":
-                                agent.huggingface_repo_id = source.get("repo_id")
+                for entry_value in datasets:
+                    entry = _as_mapping(entry_value)
+                    if not entry:
+                        continue
+                    dataset_type = entry.get("type")
+                    if isinstance(dataset_type, str):
+                        agent.types.append(dataset_type)
+                    if dataset_type == "train":
+                        license_value = entry.get("license")
+                        agent.license = license_value if isinstance(license_value, str) else None
+                        source = _as_mapping(entry.get("source"))
+                        if source.get("type") == "huggingface":
+                            repo_id = source.get("repo_id")
+                            if isinstance(repo_id, str):
+                                agent.huggingface_repo_id = repo_id
 
-                            # Backward compatibility for configs that still use the
-                            # deprecated parallel identifier fields.
-                            if not agent.huggingface_repo_id:
-                                hf_id = entry.get("huggingface_identifier")
-                                if isinstance(hf_id, dict):
-                                    agent.huggingface_repo_id = hf_id.get("repo_id")
+                        # Backward compatibility for configs that still use the
+                        # deprecated parallel identifier fields.
+                        if not agent.huggingface_repo_id:
+                            hf_id = _as_mapping(entry.get("huggingface_identifier"))
+                            legacy_repo_id = hf_id.get("repo_id")
+                            if isinstance(legacy_repo_id, str):
+                                agent.huggingface_repo_id = legacy_repo_id
             elif v3.get("harbor_datasets") or v3.get("vf_env_id"):
                 agent.types.append("train")
     return agent
 
 
-def agent_has_resources_server_ref(data: dict) -> bool:  # pragma: no cover
-    if not isinstance(data, dict):
-        return False
-    for v1 in data.values():
-        if not isinstance(v1, dict):
+def agent_has_resources_server_ref(data: object) -> bool:  # pragma: no cover
+    for v1_value in _as_mapping(data).values():
+        v1 = _as_mapping(v1_value)
+        if not v1:
             continue
-        v2 = v1.get("responses_api_agents")
-        if not isinstance(v2, dict):
+        v2 = _as_mapping(v1.get("responses_api_agents"))
+        if not v2:
             continue
-        for v3 in v2.values():
-            if isinstance(v3, dict) and v3.get("resources_server"):
+        for v3_value in v2.values():
+            v3 = _as_mapping(v3_value)
+            if v3.get("resources_server"):
                 return True
     return False
 
@@ -225,7 +240,7 @@ def extract_config_metadata(yaml_path: Path, from_agent: bool = False) -> Config
                           license: {example_license_2}
     """
     with yaml_path.open() as f:
-        data = yaml.safe_load(f)
+        data = _as_mapping(yaml.safe_load(f))
 
     resource_data = visit_agent_server(data) if from_agent else visit_resources_server(data)
     agent_data = visit_agent_datasets(data)
@@ -236,18 +251,24 @@ def extract_config_metadata(yaml_path: Path, from_agent: bool = False) -> Config
 def extract_benchmark_metadata(yaml_path: Path) -> tuple[ConfigMetadata, str]:  # pragma: no cover
     """Combine benchmark-owned datasets with metadata from its referenced agent config."""
     with yaml_path.open() as f:
-        data = yaml.safe_load(f) or {}
+        data = _as_mapping(yaml.safe_load(f))
 
     agent_data = visit_agent_datasets(data)
     resource_data = visit_agent_server(data)
     display_name = yaml_path.parent.name.replace("_", " ").title()
 
-    for config_path in data.get("config_paths", []):
+    config_paths = data.get("config_paths")
+    if not isinstance(config_paths, list):
+        config_paths = []
+
+    for config_path in config_paths:
+        if not isinstance(config_path, str):
+            continue
         referenced_path = Path(config_path)
         if not referenced_path.is_file() or "responses_api_agents" not in referenced_path.parts:
             continue
         with referenced_path.open() as f:
-            referenced_data = yaml.safe_load(f) or {}
+            referenced_data = _as_mapping(yaml.safe_load(f))
         referenced_resource = visit_agent_server(referenced_data)
         if any(
             (
@@ -288,7 +309,7 @@ def get_training_server_info() -> list[ServerInfo]:  # pragma: no cover
             for yaml_file in yaml_files:
                 if from_agent:
                     with yaml_file.open() as f:
-                        raw = yaml.safe_load(f) or {}
+                        raw = _as_mapping(yaml.safe_load(f))
                     if agent_has_resources_server_ref(raw):
                         continue
 
@@ -440,7 +461,7 @@ def format_table(table: list[list[str]]) -> str:  # pragma: no cover
     return "\n".join(formatted_rows)
 
 
-def main():  # pragma: no cover
+def main() -> None:  # pragma: no cover
     text = UPSTREAM_ENVIRONMENTS_PATH.read_text(encoding="utf-8")
 
     training_servers = get_training_server_info()

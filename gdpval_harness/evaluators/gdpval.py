@@ -241,7 +241,7 @@ def _publish(
         # The existing GDPval deliverable reader uses this marker to identify a
         # completed task.  Keep it limited to executor state and submitted file
         # names; benchmark rubric/evaluation metadata never enters the handoff.
-        finish = {
+        finish: dict[str, object] = {
             "executor": result_executor,
             "status": result_status,
             "files": copied,
@@ -293,7 +293,7 @@ class GDPvalExternalEvaluator(Evaluator):
 
     def preflight(self, run_dir: Path | None = None) -> EvaluatorPreflightResult:
         # Deliberately do not inspect or instantiate a judge/model client.
-        details = (
+        details: tuple[str, ...] = (
             "GDPval evaluator exports judge-compatible artifacts only",
             "rubric/pairwise scoring remains external to the generic runner",
         )

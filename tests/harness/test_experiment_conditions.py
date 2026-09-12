@@ -24,6 +24,7 @@ from gdpval_harness.executors.claude_code import ClaudeCodeExecutor
 from gdpval_harness.executors.codex import CodexExecutor
 from gdpval_harness.executors.cursor import CursorExecutor
 from gdpval_harness.interventions import PromptOverlayIntervention
+from gdpval_harness.interventions.base import InterventionPreflightResult
 from gdpval_harness.judges.base import JudgeRequest
 from gdpval_harness.judges.codex import CodexJudgeExecutor
 from gdpval_harness.local_judge_runner import _candidate_task_prompt
@@ -291,7 +292,7 @@ class ExperimentConditionTests(unittest.TestCase):
             executor = _CapturingLocalExecutor()
 
             class TamperingPromptOverlay(PromptOverlayIntervention):
-                def preflight(self):  # type: ignore[no-untyped-def]
+                def preflight(self) -> InterventionPreflightResult:
                     result = super().preflight()
                     if result.ok:
                         self.source.write_text("tampered intervention\n", encoding="utf-8")

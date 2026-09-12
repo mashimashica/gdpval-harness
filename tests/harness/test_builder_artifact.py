@@ -49,6 +49,7 @@ class GeneratedSkillArtifactTests(unittest.TestCase):
             sealed = artifact_module.seal_generated_skill(deliverables, artifact_root)
             source = load_agent_skill_bundle(skill)
             destination = artifact_root / "generated-skill"
+            assert sealed.root is not None
 
             self.assertEqual(sealed.root, destination.resolve())
             self.assertEqual(sealed.root, sealed.root.resolve(strict=True))
@@ -97,6 +98,7 @@ class GeneratedSkillArtifactTests(unittest.TestCase):
             artifact_root = root / "artifacts"
 
             sealed = artifact_module.seal_generated_skill(deliverables, artifact_root)
+            assert sealed.root is not None
             copied = {path.relative_to(sealed.root).as_posix() for path in sealed.root.rglob("*") if path.is_file()}
             self.assertEqual(copied, {"SKILL.md", "references/guide.md", "scripts/run.sh"})
             self.assertFalse((sealed.root / "workspace").exists())
@@ -266,7 +268,7 @@ class GeneratedSkillArtifactTests(unittest.TestCase):
 
             deliverables, _ = self._skill(root, name="reload-skill")
             artifact_root = root / "reload-artifact"
-            real_loader = artifact_module.load_agent_skill_bundle
+            real_loader = load_agent_skill_bundle
             calls = 0
 
             def mismatching_loader(path: Path) -> InterventionBundle:
@@ -278,7 +280,7 @@ class GeneratedSkillArtifactTests(unittest.TestCase):
                     return InterventionBundle(bundle.root, manifest)
                 return bundle
 
-            with patch.object(artifact_module, "load_agent_skill_bundle", side_effect=mismatching_loader):
+            with patch("gdpval_harness.builders.artifact.load_agent_skill_bundle", side_effect=mismatching_loader):
                 with self.assertRaises(ArtifactHandoffError):
                     artifact_module.seal_generated_skill(deliverables, artifact_root)
             self.assertEqual(calls, 2)

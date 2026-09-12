@@ -77,7 +77,7 @@ class CodexExecutorTests(unittest.TestCase):
             executor = CodexExecutor(network_enabled=False)
             executor._version = "codex-test"
 
-            def fake_run(command, **kwargs):
+            def fake_run(command: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
                 del kwargs
                 output_path = Path(command[command.index("--output-last-message") + 1])
                 output_path.parent.mkdir(parents=True, exist_ok=True)

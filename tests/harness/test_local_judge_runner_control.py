@@ -11,14 +11,14 @@ from pathlib import Path
 from unittest.mock import patch
 
 import gdpval_harness.local_judge_runner as runner
-from gdpval_harness.judges.base import JudgeResult
+from gdpval_harness.judges.base import JudgeRequest, JudgeResult
 
 
 class _InterruptJudge:
     def __init__(self) -> None:
         self.calls = 0
 
-    def judge(self, request):
+    def judge(self, request: JudgeRequest) -> JudgeResult:
         self.calls += 1
         request.executor_dir.mkdir(parents=True, exist_ok=True)
         (request.executor_dir / "stdout.log").write_text("partial stdout\n", encoding="utf-8")
@@ -30,7 +30,7 @@ class _FailingJudge:
     def __init__(self) -> None:
         self.calls = 0
 
-    def judge(self, request):
+    def judge(self, request: JudgeRequest) -> JudgeResult:
         self.calls += 1
         request.executor_dir.mkdir(parents=True, exist_ok=True)
         stdout = request.executor_dir / "stdout.log"

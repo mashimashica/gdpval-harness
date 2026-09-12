@@ -8,13 +8,16 @@ import json
 import os
 import tempfile
 import unittest
+from collections.abc import Mapping
 from pathlib import Path
+from typing import TypedDict, cast
 from unittest.mock import patch
 
 import gdpval_harness.runner as runner_module
 from gdpval_harness.benchmarks.base import Benchmark, BenchmarkTask
 from gdpval_harness.evaluators.base import (
     EvaluationPlan,
+    EvaluationRequest,
     EvaluationResult,
     EvaluationStatus,
     Evaluator,
@@ -48,6 +51,26 @@ from gdpval_harness.judges.pairwise import discover_tasks
 from gdpval_harness.local_judge_runner import _candidate_task_prompt
 from gdpval_harness.provenance import RepositoryProvenance, canonical_json_sha256
 from gdpval_harness.runner import run_benchmark
+
+
+class _ExecutorOptions(TypedDict, total=False):
+    result_executor: str
+    result_invocation_mode: str
+    result_version: str
+    result_auth_mode: str
+
+
+JsonObject = dict[str, object]
+
+
+def _json_object(value: object) -> JsonObject:
+    if not isinstance(value, dict) or any(not isinstance(key, str) for key in value):
+        raise AssertionError(f"expected a JSON object with string keys, got {type(value).__name__}")
+    return cast(JsonObject, value)
+
+
+def _load_json_object(path: Path) -> JsonObject:
+    return _json_object(json.loads(path.read_text(encoding="utf-8")))
 
 
 class FakeBenchmark(Benchmark):
@@ -215,7 +238,7 @@ class FakeEvaluator(Evaluator):
         if plan.task_id == self.invalid_plan_task_id:
             raise ValueError("invalid evaluation plan")
 
-    def evaluate(self, request):
+    def evaluate(self, request: EvaluationRequest) -> EvaluationResult:
         self.calls += 1
         self.events.append(f"evaluate:{request.task_id}")
         if self.fail:
@@ -288,7 +311,9 @@ class FakeExecutor(Executor):
             executor=self.result_executor or self.name,
             executor_version=self.result_version,
             invocation_mode=self.result_invocation_mode or self.invocation_mode,
-            auth_mode=self.result_auth_mode,
+            # ``None`` is retained by the null-result fixture to test the
+            # runner's persisted identity handling.
+            auth_mode=cast(str, self.result_auth_mode),
             workspace=request.workspace,
             deliverables_dir=deliverables_dir,
             status=status,
@@ -307,7 +332,8 @@ class PlanOnlyJudge(JudgeExecutor):
     def __init__(self) -> None:
         self.calls = 0
 
-    def preflight(self) -> JudgePreflightResult:
+    def preflight(self, environment: Mapping[str, str] | None = None) -> JudgePreflightResult:
+        del environment
         return JudgePreflightResult(judge_executor=self.name, ok=True, version="fake-judge-1")
 
     def judge(self, request: JudgeRequest) -> JudgeResult:
@@ -853,12 +879,12 @@ class GenericRunnerTests(unittest.TestCase):
                 events.append("benchmark")
 
         class OrderedEvaluator(FakeEvaluator):
-            def preflight(self, run_dir=None):
+            def preflight(self, run_dir: Path | None = None) -> EvaluatorPreflightResult:
                 events.append("evaluator")
                 return super().preflight(run_dir)
 
         class OrderedExecutor(FakeExecutor):
-            def preflight(self):
+            def preflight(self) -> PreflightResult:
                 events.append("executor")
                 return super().preflight()
 
@@ -874,7 +900,8 @@ class GenericRunnerTests(unittest.TestCase):
 
     def test_evaluator_preflight_failure_stops_before_executor_or_benchmark(self) -> None:
         class NotReadyEvaluator(FakeEvaluator):
-            def preflight(self, run_dir=None):
+            def preflight(self, run_dir: Path | None = None) -> EvaluatorPreflightResult:
+                del run_dir
                 self.preflight_calls += 1
                 return EvaluatorPreflightResult(
                     self.name,
@@ -884,11 +911,11 @@ class GenericRunnerTests(unittest.TestCase):
                 )
 
         class RecordingBenchmark(FakeBenchmark):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__(task_count=1)
                 self.prepared = False
 
-            def prepare(self):
+            def prepare(self) -> None:
                 self.prepared = True
 
         with tempfile.TemporaryDirectory() as tmp:
@@ -1174,7 +1201,8 @@ class GenericRunnerTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             out = Path(tmp) / "run"
             benchmark = FakeBenchmark(task_count=1)
-            benchmark.revision = None
+            # Preserve an unavailable benchmark revision in this fixture.
+            benchmark.revision = cast(str, None)
             run_benchmark(
                 benchmark,
                 FakeEvaluator(judge_fields={"judge_executor": "ignored-non-judge"}),
@@ -1266,7 +1294,7 @@ class GenericRunnerTests(unittest.TestCase):
                     limit=1,
                     model=model,
                 )
-            return json.loads((root / "run" / "run-metadata.json").read_text(encoding="utf-8"))
+            return _load_json_object(root / "run" / "run-metadata.json")
 
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -1307,7 +1335,7 @@ class GenericRunnerTests(unittest.TestCase):
                 self.assertEqual(metadata["repository"]["commit"], repository.commit)
 
     def test_executor_identity_and_typed_result_mismatches_persist_before_stopping(self) -> None:
-        cases = (
+        cases: tuple[tuple[_ExecutorOptions, str], ...] = (
             ({"result_executor": "tampered-executor"}, "mismatched executor"),
             ({"result_invocation_mode": "tampered-mode"}, "mismatched invocation_mode"),
             ({"result_version": "tampered-version"}, "mismatched executor_version"),

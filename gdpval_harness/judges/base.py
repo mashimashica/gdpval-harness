@@ -73,7 +73,7 @@ class JudgeExecutor(ABC):
     invocation_mode: str
 
     @abstractmethod
-    def preflight(self) -> JudgePreflightResult:
+    def preflight(self, environment: Mapping[str, str] | None = None) -> JudgePreflightResult:
         raise NotImplementedError
 
     @abstractmethod

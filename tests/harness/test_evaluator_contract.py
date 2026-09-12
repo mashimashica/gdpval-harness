@@ -7,6 +7,7 @@ import tempfile
 import unittest
 from dataclasses import FrozenInstanceError
 from pathlib import Path
+from typing import cast
 
 from gdpval_harness.evaluators.aime26 import AIME26Evaluator
 from gdpval_harness.evaluators.base import (
@@ -52,13 +53,15 @@ class EvaluatorContractTests(unittest.TestCase):
             candidate_count=1,
         )
         with self.assertRaises(TypeError):
-            plan.metadata["new_key"] = "value"  # type: ignore[index]
+            # Preserve the invalid mutation at the immutable mapping boundary.
+            cast(dict[str, object], plan.metadata)["new_key"] = "value"
         with self.assertRaises(FrozenInstanceError):
-            plan.task_id = "other"  # type: ignore[misc]
+            setattr(plan, "task_id", "other")
         # The freeze is intentionally shallow: evaluator metadata values retain
         # their normal object semantics without being copied recursively.
-        plan.metadata["expected_answer"]["source"] = "updated"  # type: ignore[index]
-        self.assertEqual(plan.metadata["expected_answer"], {"source": "updated"})
+        expected_answer = cast(dict[str, object], plan.metadata["expected_answer"])
+        expected_answer["source"] = "updated"
+        self.assertEqual(expected_answer, {"source": "updated"})
 
     def test_exact_and_aime_plans_require_one_candidate_and_expected_answer(self) -> None:
         valid = EvaluationPlan(

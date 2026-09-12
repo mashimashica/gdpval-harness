@@ -8,6 +8,7 @@ import hashlib
 import json
 import os
 import subprocess
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -144,7 +145,7 @@ def main() -> None:
     temp_path = metadata_path.with_suffix(".json.tmp")
     temp_path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     temp_path.replace(metadata_path)
-    print(f"gdpval: wrote run metadata to {metadata_path}", file=os.sys.stderr)
+    print(f"gdpval: wrote run metadata to {metadata_path}", file=sys.stderr)
 
 
 if __name__ == "__main__":

@@ -16,11 +16,13 @@ def _parse_sequence(value: object) -> tuple[str, ...]:
     if value is None:
         return ()
     if isinstance(value, str):
+        raw_value = value
         try:
-            value = json.loads(value)
+            parsed: object = json.loads(raw_value)
         except json.JSONDecodeError:
-            return (value,)
-    if isinstance(value, list):
+            return (raw_value,)
+        value = parsed
+    if isinstance(value, (list, tuple)):
         return tuple(str(item) for item in value)
     return ()
 
@@ -93,8 +95,8 @@ class GDPvalBenchmark(Benchmark):
         return tasks
 
     def materialize(self, task: BenchmarkTask, workspace: Path) -> list[str]:
-        reference_files = tuple(str(item) for item in task.materialization.get("reference_files", ()))
-        reference_urls = tuple(str(item) for item in task.materialization.get("reference_file_urls", ()))
+        reference_files = _parse_sequence(task.materialization.get("reference_files"))
+        reference_urls = _parse_sequence(task.materialization.get("reference_file_urls"))
         if not reference_files and not reference_urls:
             return []
         if len(reference_files) != len(reference_urls):

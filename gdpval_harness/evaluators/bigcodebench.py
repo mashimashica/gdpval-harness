@@ -248,10 +248,13 @@ class BigCodeBenchEvaluator(Evaluator):
                 "grader_python": str(self._bcb_python) if self._bcb_python else None,
             }
         )
+        reward = native.get("reward")
+        if not isinstance(reward, (int, float)) or isinstance(reward, bool):
+            raise TypeError("BigCodeBench grader returned a non-numeric reward")
         return EvaluationResult(
             task_id=request.task_id,
             status=EvaluationStatus.COMPLETED,
-            metrics={"pass_rate": float(native["reward"])},
+            metrics={"pass_rate": float(reward)},
             details=details,
         )
 

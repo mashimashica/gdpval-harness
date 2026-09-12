@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import importlib
 import importlib.metadata
+from numbers import Real
 from pathlib import Path
 
 from gdpval_harness.evaluators.base import (
@@ -38,7 +39,15 @@ def _native_math_evaluate(expected_answer: str, generated_answer: str) -> tuple[
         gold_extraction_target=(helper.LatexExtractionConfig(),),
         pred_extraction_target=(helper.ExprExtractionConfig(), helper.LatexExtractionConfig()),
     )
-    return helper._run_math_verify(verifier, expected_answer, generated_answer)
+    raw_result: object = helper._run_math_verify(verifier, expected_answer, generated_answer)
+    if not isinstance(raw_result, tuple) or len(raw_result) != 2:
+        raise TypeError("native math verifier returned an invalid result")
+    score, extracted_answer = raw_result
+    if not isinstance(score, Real) or isinstance(score, bool):
+        raise TypeError("native math verifier returned a non-numeric score")
+    if extracted_answer is not None and not isinstance(extracted_answer, str):
+        raise TypeError("native math verifier returned a non-string extracted answer")
+    return float(score), extracted_answer
 
 
 def _math_verify_preflight() -> tuple[bool, str, str | None]:

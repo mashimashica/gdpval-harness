@@ -46,7 +46,7 @@ class InterventionContractTests(unittest.TestCase):
         self.assertEqual(manifest.manifest_sha256, expected)
         self.assertNotIn("manifest_sha256", canonical_manifest_bytes(manifest).decode())
         with self.assertRaises(FrozenInstanceError):
-            item.path = "changed"  # type: ignore[misc]
+            setattr(item, "path", "changed")
 
     def test_successful_preflight_requires_a_bundle_and_manifest_paths_are_posix(self) -> None:
         with self.assertRaises(ValueError):
@@ -79,7 +79,8 @@ class InterventionContractTests(unittest.TestCase):
         intervention = NoneIntervention()
         result = intervention.preflight()
         self.assertTrue(result.ok)
-        self.assertEqual(result.bundle.manifest.revision_status, "not-applicable")  # type: ignore[union-attr]
+        assert result.bundle is not None
+        self.assertEqual(result.bundle.manifest.revision_status, "not-applicable")
         applied = intervention.apply(task, Path("/unused"), application_run_id="run-1")
         self.assertIs(applied.task, task)
         self.assertEqual(applied.materialized_files, ())
@@ -104,7 +105,8 @@ class InterventionContractTests(unittest.TestCase):
             intervention = PromptOverlayIntervention(source)
             result = intervention.preflight()
             self.assertTrue(result.ok, result.details)
-            manifest_bytes = canonical_manifest_bytes(result.bundle.manifest)  # type: ignore[union-attr]
+            assert result.bundle is not None
+            manifest_bytes = canonical_manifest_bytes(result.bundle.manifest)
             self.assertNotIn(str(source), manifest_bytes.decode("utf-8"))
 
             source.write_text("tampered", encoding="utf-8")

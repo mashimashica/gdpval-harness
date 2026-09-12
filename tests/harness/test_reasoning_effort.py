@@ -8,9 +8,11 @@ import subprocess
 import tempfile
 import unittest
 from pathlib import Path
+from typing import TypedDict, cast
 from unittest.mock import patch
 
 from gdpval_harness.benchmarks.base import Benchmark, BenchmarkTask
+from gdpval_harness.builders.base import BuilderInputBundle
 from gdpval_harness.builders.executor_skill import ExecutorSkillBuilder
 from gdpval_harness.builders.inputs import load_builder_input_bundle
 from gdpval_harness.evaluators.base import (
@@ -44,8 +46,47 @@ from gdpval_harness.judges.base import JudgeRequest
 from gdpval_harness.judges.codex import CodexJudgeExecutor
 from gdpval_harness.local_runner import _validate_resume_condition
 from gdpval_harness.provenance import canonical_json_sha256
-from gdpval_harness.reasoning import REASONING_EFFORT_VALUES, validate_reasoning_effort
-from gdpval_harness.runner import run_benchmark
+from gdpval_harness.reasoning import (
+    REASONING_EFFORT_VALUES,
+    ReasoningEffortOption,
+    validate_reasoning_effort,
+)
+from gdpval_harness.runner import RunSummary, run_benchmark
+
+
+class _ExperimentRunConfigValues(TypedDict):
+    builder_executor: str
+    application_executor: str
+    evaluator: str
+    builder_model: str | None
+    application_model: str | None
+    builder_timeout_seconds: float
+    application_timeout_seconds: float
+    builder_network_enabled: bool
+    application_network_enabled: bool
+    limit: int
+    order_seed: int
+    builder_reasoning_effort: ReasoningEffortOption
+    application_reasoning_effort: ReasoningEffortOption
+
+
+JsonObject = dict[str, object]
+
+
+def _json_object(value: object) -> JsonObject:
+    if not isinstance(value, dict) or not all(isinstance(key, str) for key in value):
+        raise AssertionError(f"expected a JSON object, got {type(value).__name__}")
+    return cast(JsonObject, value)
+
+
+def _json_array(value: object) -> list[object]:
+    if not isinstance(value, list):
+        raise AssertionError(f"expected a JSON array, got {type(value).__name__}")
+    return value
+
+
+def _load_json_object(text: str) -> JsonObject:
+    return _json_object(json.loads(text))
 
 
 class _FakeBenchmark(Benchmark):
@@ -90,7 +131,7 @@ class _FakeExecutor(Executor):
     name = "codex"
     invocation_mode = "fake-codex"
 
-    def __init__(self, reasoning_effort: str | None, *, skill: bool = False) -> None:
+    def __init__(self, reasoning_effort: ReasoningEffortOption, *, skill: bool = False) -> None:
         self.reasoning_effort = reasoning_effort
         self.skill = skill
         self.preflight_calls = 0
@@ -179,7 +220,7 @@ class ReasoningEffortContractTests(unittest.TestCase):
             "order_seed": 0,
         }
         values.update(updates)
-        return ExperimentRunConfig(**values)
+        return ExperimentRunConfig(**cast(_ExperimentRunConfigValues, values))
 
     def test_allowlist_is_exact_and_non_codex_effort_is_rejected(self) -> None:
         self.assertEqual(
@@ -231,12 +272,16 @@ class ReasoningEffortContractTests(unittest.TestCase):
             baseline_metadata = self._read_json(root / "baseline" / "run-metadata.json")
             baseline_again_metadata = self._read_json(root / "baseline-again" / "run-metadata.json")
             requested_metadata = self._read_json(root / "requested" / "run-metadata.json")
+            baseline_configuration = _json_object(baseline_metadata["configuration"])
+            baseline_executor = _json_object(baseline_configuration["executor"])
+            requested_configuration = _json_object(requested_metadata["configuration"])
+            requested_executor = _json_object(requested_configuration["executor"])
 
             self.assertEqual(baseline.status, "completed")
             self.assertEqual(baseline_again.status, "completed")
             self.assertEqual(requested.status, "completed")
             self.assertEqual(
-                set(baseline_metadata["configuration"]),
+                set(baseline_configuration),
                 {
                     "benchmark",
                     "executor",
@@ -250,10 +295,10 @@ class ReasoningEffortContractTests(unittest.TestCase):
                 },
             )
             self.assertNotIn("reasoning_effort_requested", baseline_metadata)
-            self.assertNotIn("reasoning_effort_requested", baseline_metadata["configuration"]["executor"])
+            self.assertNotIn("reasoning_effort_requested", baseline_executor)
             self.assertEqual(
                 baseline_metadata["configuration_sha256"],
-                canonical_json_sha256(baseline_metadata["configuration"]),
+                canonical_json_sha256(baseline_configuration),
             )
             self.assertEqual(
                 baseline_metadata["configuration_sha256"], baseline_again_metadata["configuration_sha256"]
@@ -263,15 +308,17 @@ class ReasoningEffortContractTests(unittest.TestCase):
             )
 
             self.assertEqual(requested_metadata["reasoning_effort_requested"], "high")
-            self.assertEqual(requested_metadata["configuration"]["executor"]["reasoning_effort_requested"], "high")
+            self.assertEqual(requested_executor["reasoning_effort_requested"], "high")
             self.assertNotEqual(baseline_metadata["configuration_sha256"], requested_metadata["configuration_sha256"])
             self.assertNotEqual(
                 baseline_metadata["run_fingerprint_sha256"], requested_metadata["run_fingerprint_sha256"]
             )
             requested_row = self._read_jsonl(root / "requested" / "results.jsonl")[0]
             baseline_row = self._read_jsonl(root / "baseline" / "results.jsonl")[0]
-            self.assertEqual(requested_row["execution"]["reasoning_effort_requested"], "high")
-            self.assertNotIn("reasoning_effort_requested", baseline_row["execution"])
+            requested_execution = _json_object(requested_row["execution"])
+            baseline_execution = _json_object(baseline_row["execution"])
+            self.assertEqual(requested_execution["reasoning_effort_requested"], "high")
+            self.assertNotIn("reasoning_effort_requested", baseline_execution)
 
     def test_non_codex_effort_rejects_before_preflight_or_output(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -297,21 +344,29 @@ class ReasoningEffortContractTests(unittest.TestCase):
             builder_high_metadata = self._run_experiment(root / "builder-high", "high", "low")
             application_high_metadata = self._run_experiment(root / "application-high", "high", "high")
 
-            baseline_config = baseline_metadata["configuration"]
-            self.assertNotIn("builder_reasoning_effort_requested", baseline_config["run_config"])
-            self.assertNotIn("application_reasoning_effort_requested", baseline_config["run_config"])
-            self.assertNotIn("reasoning_effort_requested", baseline_config["builder"])
-            self.assertNotIn("reasoning_effort_requested", baseline_config["application_executor"])
+            baseline_config = _json_object(baseline_metadata["configuration"])
+            baseline_run_config = _json_object(baseline_config["run_config"])
+            baseline_builder = _json_object(baseline_config["builder"])
+            baseline_application = _json_object(baseline_config["application_executor"])
+            self.assertNotIn("builder_reasoning_effort_requested", baseline_run_config)
+            self.assertNotIn("application_reasoning_effort_requested", baseline_run_config)
+            self.assertNotIn("reasoning_effort_requested", baseline_builder)
+            self.assertNotIn("reasoning_effort_requested", baseline_application)
 
-            both_low_config = both_low_metadata["configuration"]
-            self.assertEqual(both_low_config["run_config"]["builder_reasoning_effort_requested"], "low")
-            self.assertEqual(both_low_config["run_config"]["application_reasoning_effort_requested"], "low")
-            self.assertEqual(both_low_config["builder"]["reasoning_effort_requested"], "low")
-            self.assertEqual(both_low_config["application_executor"]["reasoning_effort_requested"], "low")
+            both_low_config = _json_object(both_low_metadata["configuration"])
+            both_low_run_config = _json_object(both_low_config["run_config"])
+            both_low_builder = _json_object(both_low_config["builder"])
+            both_low_application = _json_object(both_low_config["application_executor"])
+            self.assertEqual(both_low_run_config["builder_reasoning_effort_requested"], "low")
+            self.assertEqual(both_low_run_config["application_reasoning_effort_requested"], "low")
+            self.assertEqual(both_low_builder["reasoning_effort_requested"], "low")
+            self.assertEqual(both_low_application["reasoning_effort_requested"], "low")
 
-            builder_high_config = builder_high_metadata["configuration"]
-            self.assertEqual(builder_high_config["builder"]["reasoning_effort_requested"], "high")
-            self.assertEqual(builder_high_config["application_executor"]["reasoning_effort_requested"], "low")
+            builder_high_config = _json_object(builder_high_metadata["configuration"])
+            builder_high_builder = _json_object(builder_high_config["builder"])
+            builder_high_application = _json_object(builder_high_config["application_executor"])
+            self.assertEqual(builder_high_builder["reasoning_effort_requested"], "high")
+            self.assertEqual(builder_high_application["reasoning_effort_requested"], "low")
             self.assertNotEqual(
                 both_low_metadata["configuration_sha256"], builder_high_metadata["configuration_sha256"]
             )
@@ -319,9 +374,11 @@ class ReasoningEffortContractTests(unittest.TestCase):
                 both_low_metadata["run_fingerprint_sha256"], builder_high_metadata["run_fingerprint_sha256"]
             )
 
-            application_high_config = application_high_metadata["configuration"]
-            self.assertEqual(application_high_config["builder"]["reasoning_effort_requested"], "high")
-            self.assertEqual(application_high_config["application_executor"]["reasoning_effort_requested"], "high")
+            application_high_config = _json_object(application_high_metadata["configuration"])
+            application_high_builder = _json_object(application_high_config["builder"])
+            application_high_application = _json_object(application_high_config["application_executor"])
+            self.assertEqual(application_high_builder["reasoning_effort_requested"], "high")
+            self.assertEqual(application_high_application["reasoning_effort_requested"], "high")
             self.assertNotEqual(
                 builder_high_metadata["configuration_sha256"], application_high_metadata["configuration_sha256"]
             )
@@ -373,13 +430,15 @@ class ReasoningEffortContractTests(unittest.TestCase):
             executor = CodexExecutor(command="old-codex", reasoning_effort="max")
             executor._version = "old-codex-1"
             calls: list[list[str]] = []
-            real_run = subprocess.run
 
-            def fake_run(command: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+            def fake_run(
+                command: list[str], *, input: str | None = None, **kwargs: object
+            ) -> subprocess.CompletedProcess[str]:
+                del input, kwargs
                 if command and command[0] == "old-codex":
                     calls.append(command)
                     return subprocess.CompletedProcess(command, 2, stdout="", stderr="invalid enum value max")
-                return real_run(command, **kwargs)
+                raise AssertionError(f"unexpected subprocess command: {command!r}")
 
             with (
                 patch.object(
@@ -409,8 +468,9 @@ class ReasoningEffortContractTests(unittest.TestCase):
             self.assertEqual(metadata["reasoning_effort_requested"], "max")
             rows = self._read_jsonl(root / "run" / "results.jsonl")
             self.assertEqual(len(rows), 1)
-            self.assertEqual(rows[0]["execution"]["reasoning_effort_requested"], "max")
-            self.assertEqual(rows[0]["execution"]["exit_code"], 2)
+            execution = _json_object(rows[0]["execution"])
+            self.assertEqual(execution["reasoning_effort_requested"], "max")
+            self.assertEqual(execution["exit_code"], 2)
             self.assertTrue((root / "run" / "tasks" / "task-0" / "result.json").is_file())
 
     def test_old_codex_max_failure_is_durable_and_stops_experiment_applications(self) -> None:
@@ -419,13 +479,15 @@ class ReasoningEffortContractTests(unittest.TestCase):
             application = CodexExecutor(command="old-codex", reasoning_effort="max")
             application._version = "old-codex-1"
             calls: list[list[str]] = []
-            real_run = subprocess.run
 
-            def fake_run(command: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+            def fake_run(
+                command: list[str], *, input: str | None = None, **kwargs: object
+            ) -> subprocess.CompletedProcess[str]:
+                del input, kwargs
                 if command and command[0] == "old-codex":
                     calls.append(command)
                     return subprocess.CompletedProcess(command, 2, stdout="", stderr="invalid enum value max")
-                return real_run(command, **kwargs)
+                raise AssertionError(f"unexpected subprocess command: {command!r}")
 
             profile, config, benchmark, evaluator, builder, source_roots = self._experiment_fixture(
                 root, task_count=2, application_reasoning_effort="max"
@@ -472,21 +534,31 @@ class ReasoningEffortContractTests(unittest.TestCase):
             experiment_metadata = self._read_json(root / "output" / "experiment-metadata.json")
             self.assertEqual(experiment_metadata["status"], "failed")
             self.assertEqual(experiment_metadata["completed_applications"], 0)
-            self.assertEqual(experiment_metadata["run_config"]["application_reasoning_effort_requested"], "max")
+            run_config = _json_object(experiment_metadata["run_config"])
+            experiment_configuration = _json_object(experiment_metadata["configuration"])
+            experiment_application = _json_object(experiment_configuration["application_executor"])
+            self.assertEqual(run_config["application_reasoning_effort_requested"], "max")
             self.assertEqual(
-                experiment_metadata["configuration"]["application_executor"]["reasoning_effort_requested"],
+                experiment_application["reasoning_effort_requested"],
                 "max",
             )
-            application_metadata_path = Path(experiment_metadata["entries"][0]["application"]["run_metadata_path"])
+            entries = _json_array(experiment_metadata["entries"])
+            if len(entries) < 2:
+                raise AssertionError("expected at least two experiment entries")
+            first_entry = _json_object(entries[0])
+            first_application = _json_object(first_entry["application"])
+            application_metadata_path = Path(cast(str, first_application["run_metadata_path"]))
             application_metadata = self._read_json(application_metadata_path)
             self.assertEqual(application_metadata["status"], "failed")
             self.assertEqual(application_metadata["reasoning_effort_requested"], "max")
             application_row = self._read_jsonl(application_metadata_path.with_name("results.jsonl"))[0]
-            self.assertEqual(application_row["execution"]["reasoning_effort_requested"], "max")
-            self.assertEqual(application_row["execution"]["exit_code"], 2)
-            self.assertIsNone(experiment_metadata["entries"][1]["application"])
+            application_execution = _json_object(application_row["execution"])
+            self.assertEqual(application_execution["reasoning_effort_requested"], "max")
+            self.assertEqual(application_execution["exit_code"], 2)
+            second_entry = _json_object(entries[1])
+            self.assertIsNone(second_entry["application"])
 
-    def _run_generic(self, out_dir: Path, effort: str | None):
+    def _run_generic(self, out_dir: Path, effort: ReasoningEffortOption) -> RunSummary:
         return run_benchmark(
             _FakeBenchmark(task_count=1),
             _FakeEvaluator(),
@@ -500,9 +572,16 @@ class ReasoningEffortContractTests(unittest.TestCase):
         root: Path,
         *,
         task_count: int = 1,
-        builder_reasoning_effort: str | None = None,
-        application_reasoning_effort: str | None = None,
-    ):
+        builder_reasoning_effort: ReasoningEffortOption = None,
+        application_reasoning_effort: ReasoningEffortOption = None,
+    ) -> tuple[
+        LoadedExperimentProfile,
+        ExperimentRunConfig,
+        _FakeBenchmark,
+        _ExperimentEvaluator,
+        ExecutorSkillBuilder,
+        BuilderInputBundle,
+    ]:
         source = root / "input-source"
         source.mkdir(parents=True)
         (source / "guide.txt").write_text("allowlisted input", encoding="utf-8")
@@ -547,8 +626,8 @@ class ReasoningEffortContractTests(unittest.TestCase):
     def _run_experiment(
         self,
         root: Path,
-        builder_reasoning_effort: str | None,
-        application_reasoning_effort: str | None,
+        builder_reasoning_effort: ReasoningEffortOption,
+        application_reasoning_effort: ReasoningEffortOption,
     ) -> dict[str, object]:
         profile, config, benchmark, evaluator, builder, source_bundle = self._experiment_fixture(
             root,
@@ -605,11 +684,11 @@ class ReasoningEffortContractTests(unittest.TestCase):
 
     @staticmethod
     def _read_json(path: Path) -> dict[str, object]:
-        return json.loads(path.read_text(encoding="utf-8"))
+        return _load_json_object(path.read_text(encoding="utf-8"))
 
     @classmethod
     def _read_jsonl(cls, path: Path) -> list[dict[str, object]]:
-        return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
+        return [_load_json_object(line) for line in path.read_text(encoding="utf-8").splitlines()]
 
 
 def _pairs(command: list[str]) -> list[list[str]]:

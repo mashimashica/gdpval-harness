@@ -396,6 +396,7 @@ class PairwiseJudgeEvaluator(Evaluator):
                 raise RuntimeError(f"pairwise judge failed closed for task {request.task_id!r} trial {trial_index}")
 
             assert normalized is not None
+            assert isinstance(verdict, Verdict)
             normalized_values.append(normalized)
             trial_verdicts.append(
                 {

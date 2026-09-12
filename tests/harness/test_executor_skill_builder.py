@@ -7,6 +7,7 @@ import tempfile
 import unittest
 from dataclasses import replace
 from pathlib import Path
+from typing import cast
 from unittest.mock import patch
 
 from gdpval_harness.builders import BuildFailurePhase, BuildRequest, BuildStatus
@@ -31,7 +32,7 @@ class DeterministicExecutor(Executor):
     def __init__(
         self,
         *,
-        preflight_ok: object = True,
+        preflight_ok: bool = True,
         preflight_executor: str | None = None,
         preflight_exception: Exception | None = None,
         status: ExecutionStatus = ExecutionStatus.COMPLETED,
@@ -203,7 +204,8 @@ class ExecutorSkillBuilderTests(unittest.TestCase):
     def test_preflight_fail_closed_maps_type_only_and_rejects_truthy_or_wrong_identity(self) -> None:
         cases = (
             ("raised secret", {"preflight_exception": RuntimeError("PREFLIGHT-SECRET-SENTINEL")}, "RuntimeError"),
-            ("truthy non-bool", {"preflight_ok": "truthy"}, None),
+            # Preserve the invalid truthy value to exercise fail-closed handling.
+            ("truthy non-bool", {"preflight_ok": cast(bool, "truthy")}, None),
             ("wrong identity", {"preflight_executor": "other-executor"}, None),
         )
         for label, options, exception_type in cases:
@@ -531,6 +533,7 @@ class ExecutorSkillBuilderTests(unittest.TestCase):
             self.assertNotIn("BUILDER-OUTPUT-SENTINEL", application_request_serialized)
             self.assertNotIn("BUILDER-METADATA-SENTINEL", application_request_serialized)
             self.assertIsNot(build_executor, application_executor)
+            assert build_executor.last_request is not None
             self.assertNotEqual(build_executor.last_request.workspace, application_workspace)
             self.assertNotEqual(build_executor.last_request.executor_dir, application_executor_dir)
             self.assertNotEqual(build_executor.last_request.deliverables_dir, application_deliverables)

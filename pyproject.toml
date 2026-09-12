@@ -375,7 +375,12 @@ dev = [
     # Mypy: Used for Python type checking.
     # Updated: Thu Sep 04, 2025 with mypy==1.17.1
     # License: MIT https://github.com/python/mypy/blob/645b421fa23a3f0d63f651059fa1e8318a6f214a/LICENSE
-    "mypy>=1.8.0",
+    "mypy==1.17.1",
+
+    # types-PyYAML: Type stubs for the PyYAML manifest parser used by the GDPval Agent Skill intervention.
+    # Updated: Mon Sep 15, 2025 with types-PyYAML==6.0.12.20250915
+    # License: Apache-2.0 https://github.com/python/typeshed/blob/main/LICENSE
+    "types-PyYAML==6.0.12.20250915",
 
     # Ruff: Used for Python code formatting and linting.
     # Updated: Thu Aug 28, 2025 with ruff==0.12.11
@@ -424,6 +429,20 @@ codec = [
 [build-system]
 requires = ["setuptools>=61", "setuptools-scm"]
 build-backend = "setuptools.build_meta"
+
+[tool.mypy]
+python_version = "3.13"
+strict = true
+explicit_package_bases = true
+follow_imports = "silent"
+files = [
+    "gdpval_harness",
+    "scripts/gdpval_run_metadata.py",
+    "scripts/update_env_list.py",
+    "tests/harness",
+    "tests/test_update_env_list.py",
+    "tests/unit_tests/test_update_env_list.py",
+]
 
 [tool.uv]
 managed = true

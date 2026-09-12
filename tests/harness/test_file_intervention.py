@@ -12,6 +12,7 @@ from typing import Callable
 
 from gdpval_harness.executors.base import TaskSpec
 from gdpval_harness.interventions import FilesIntervention
+from gdpval_harness.interventions.base import InterventionPreflightResult
 
 
 class FileInterventionTests(unittest.TestCase):
@@ -31,8 +32,9 @@ class FileInterventionTests(unittest.TestCase):
             intervention = FilesIntervention(source)
             preflight = intervention.preflight()
             self.assertTrue(preflight.ok, preflight.details)
+            assert preflight.bundle is not None
             self.assertEqual(
-                [item.path for item in preflight.bundle.manifest.files],  # type: ignore[union-attr]
+                [item.path for item in preflight.bundle.manifest.files],
                 ["a.txt", "nested/b.txt"],
             )
 
@@ -107,7 +109,7 @@ class FileInterventionTests(unittest.TestCase):
     def test_source_requires_regular_files_and_rejects_symlinks_reserved_paths_and_collisions(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            cases: list[tuple[str, Callable[[], object]]] = []
+            cases: list[tuple[str, Callable[[], InterventionPreflightResult]]] = []
 
             symlink_source = root / "symlink-source"
             symlink_source.mkdir()

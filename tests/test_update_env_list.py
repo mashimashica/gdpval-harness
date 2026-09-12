@@ -19,7 +19,7 @@ import pytest
 import scripts.update_env_list as update_env_list
 
 
-def test_main_updates_upstream_environment_document(tmp_path: Path, monkeypatch) -> None:
+def test_main_updates_upstream_environment_document(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     destination = tmp_path / "UPSTREAM-ENVIRONMENTS.md"
     destination.write_text(
         "before\n<!-- START_TRAINING_SERVERS_TABLE -->old<!-- END_TRAINING_SERVERS_TABLE -->\nafter\n",
@@ -38,7 +38,9 @@ def test_main_updates_upstream_environment_document(tmp_path: Path, monkeypatch)
     assert "<!-- END_TRAINING_SERVERS_TABLE -->\n" in text
 
 
-def test_main_reports_missing_upstream_environment_markers(tmp_path: Path, monkeypatch, capsys) -> None:
+def test_main_reports_missing_upstream_environment_markers(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
     destination = tmp_path / "UPSTREAM-ENVIRONMENTS.md"
     destination.write_text("# Missing markers\n", encoding="utf-8")
     monkeypatch.setattr(update_env_list, "UPSTREAM_ENVIRONMENTS_PATH", destination)
@@ -50,7 +52,7 @@ def test_main_reports_missing_upstream_environment_markers(tmp_path: Path, monke
     assert "UPSTREAM-ENVIRONMENTS.md" in capsys.readouterr().err
 
 
-def test_training_server_info_includes_benchmark_configs(tmp_path: Path, monkeypatch) -> None:
+def test_training_server_info_includes_benchmark_configs(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     resources_servers = tmp_path / "resources_servers"
     responses_api_agents = tmp_path / "responses_api_agents"
     benchmarks = tmp_path / "benchmarks"

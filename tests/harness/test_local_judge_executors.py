@@ -8,11 +8,18 @@ import os
 import tempfile
 import unittest
 from pathlib import Path
+from typing import Protocol, cast
 from unittest.mock import patch
 
 from gdpval_harness.judges.base import JudgeRequest
 from gdpval_harness.judges.claude_code import ClaudeCodeJudgeExecutor
 from gdpval_harness.judges.codex import CodexJudgeExecutor
+
+
+class _BinaryStream(Protocol):
+    def write(self, data: bytes) -> int: ...
+
+    def flush(self) -> None: ...
 
 
 class LocalJudgeExecutorTests(unittest.TestCase):
@@ -147,11 +154,14 @@ class LocalJudgeExecutorTests(unittest.TestCase):
             request = self.request(root, environment={"PATH": str(base)})
             judge = CodexJudgeExecutor(command=str(command_path))
 
-            def interrupt_after_output(*args, **kwargs):
-                kwargs["stdout"].write(b"partial \xff stdout\n")
-                kwargs["stderr"].write(b"partial \xff stderr\n")
-                kwargs["stdout"].flush()
-                kwargs["stderr"].flush()
+            def interrupt_after_output(*args: object, **kwargs: object) -> None:
+                del args
+                stdout = cast(_BinaryStream, kwargs["stdout"])
+                stderr = cast(_BinaryStream, kwargs["stderr"])
+                stdout.write(b"partial \xff stdout\n")
+                stderr.write(b"partial \xff stderr\n")
+                stdout.flush()
+                stderr.flush()
                 raise KeyboardInterrupt
 
             with (

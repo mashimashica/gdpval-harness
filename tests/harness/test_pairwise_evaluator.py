@@ -5,12 +5,18 @@ from __future__ import annotations
 
 import tempfile
 import unittest
+from collections.abc import Mapping
 from pathlib import Path
+from typing import TypedDict, cast
 
 from gdpval_harness.evaluators.base import EvaluationCandidate, EvaluationRequest, EvaluationStatus
 from gdpval_harness.evaluators.pairwise import PairwiseJudgeEvaluator
 from gdpval_harness.executors.base import ExecutionResult, ExecutionStatus
 from gdpval_harness.judges.base import JudgeExecutor, JudgePreflightResult, JudgeRequest, JudgeResult, Verdict
+
+
+class _CandidateOutcome(TypedDict):
+    candidate_id: str
 
 
 class FakeJudge(JudgeExecutor):
@@ -20,10 +26,10 @@ class FakeJudge(JudgeExecutor):
     def __init__(self, *, verdict: Verdict = Verdict.A, exit_code: int | None = 0) -> None:
         self.verdict = verdict
         self.exit_code = exit_code
-        self.preflight_environment = None
+        self.preflight_environment: Mapping[str, str] | None = None
         self.requests: list[JudgeRequest] = []
 
-    def preflight(self, environment=None) -> JudgePreflightResult:
+    def preflight(self, environment: Mapping[str, str] | None = None) -> JudgePreflightResult:
         self.preflight_environment = environment
         return JudgePreflightResult(
             judge_executor=self.name,
@@ -116,8 +122,10 @@ class PairwiseEvaluatorTests(unittest.TestCase):
             self.assertEqual(preflight.judge_auth_mode, "fake-subscription")
             self.assertEqual(result.status, EvaluationStatus.COMPLETED)
             self.assertEqual(result.metrics, {})
-            self.assertEqual(result.outcomes["candidate_a"]["candidate_id"], "candidate-secret-a")
-            self.assertEqual(len(result.outcomes["trial_verdicts"]), 2)
+            candidate_a = cast(_CandidateOutcome, result.outcomes["candidate_a"])
+            trial_verdicts = cast(list[object], result.outcomes["trial_verdicts"])
+            self.assertEqual(candidate_a["candidate_id"], "candidate-secret-a")
+            self.assertEqual(len(trial_verdicts), 2)
             self.assertEqual(judge.preflight_environment, {"PATH": "/bin"})
             self.assertEqual(len(judge.requests), 2)
             request = judge.requests[0]
@@ -137,7 +145,8 @@ class PairwiseEvaluatorTests(unittest.TestCase):
             root = Path(tmp)
             first = _candidate(root, "a", "a")
             second = _candidate(root, "b", "b")
-            judge = FakeJudge(verdict=None, exit_code=1)  # type: ignore[arg-type]
+            # Preserve the invalid runtime verdict to exercise fail-closed handling.
+            judge = FakeJudge(verdict=cast(Verdict, None), exit_code=1)
             evaluator = PairwiseJudgeEvaluator(judge, trials=1)
             evaluator.preflight(root / "run")
             with self.assertRaisesRegex(RuntimeError, "failed closed"):
@@ -153,6 +162,7 @@ class PairwiseEvaluatorTests(unittest.TestCase):
             root = Path(tmp)
             first = _candidate(root, "a", "a")
             second = _candidate(root, "b", "b")
+            assert second.artifacts_dir is not None
             failed = _execution(second.artifacts_dir, "b")
             failed = ExecutionResult(
                 task_id=failed.task_id,
@@ -236,6 +246,7 @@ class PairwiseEvaluatorTests(unittest.TestCase):
                 evaluator.evaluate(
                     EvaluationRequest("task/x", "prompt", candidates=(first, second), artifact_dir=output)
                 )
+            assert second.artifacts_dir is not None
             (second.artifacts_dir / "reference_files" / "ref.txt").write_text("different", encoding="utf-8")
             evaluator = PairwiseJudgeEvaluator(FakeJudge())
             evaluator.preflight(root / "run")

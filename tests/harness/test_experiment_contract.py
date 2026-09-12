@@ -5,8 +5,10 @@ from __future__ import annotations
 
 import math
 import unittest
-from dataclasses import FrozenInstanceError
+from dataclasses import FrozenInstanceError, is_dataclass
+from dataclasses import fields as dataclass_fields
 from pathlib import Path
+from typing import TypedDict, cast
 
 import gdpval_harness.experiments as experiments
 import gdpval_harness.experiments.profile as profile_module
@@ -39,6 +41,20 @@ _VALID_PUBLIC_NAMES = _VALID_CONTRACT_NAMES + (
     "load_experiment_inputs",
     "run_builder_experiment",
 )
+
+
+class _ExperimentRunConfigValues(TypedDict):
+    builder_executor: str
+    application_executor: str
+    evaluator: str
+    builder_model: str | None
+    application_model: str | None
+    builder_timeout_seconds: float
+    application_timeout_seconds: float
+    builder_network_enabled: bool
+    application_network_enabled: bool
+    limit: int
+    order_seed: int
 
 
 class ExperimentContractTests(unittest.TestCase):
@@ -76,7 +92,9 @@ class ExperimentContractTests(unittest.TestCase):
             "order_seed": 0,
         }
         values.update(overrides)
-        return ExperimentRunConfig(**values)  # type: ignore[arg-type]
+        # The invalid values passed through ``overrides`` are intentional runtime
+        # validation cases; keep the constructor boundary typed for valid defaults.
+        return ExperimentRunConfig(**cast(_ExperimentRunConfigValues, values))
 
     def test_public_shapes_exports_and_frozen_records_are_exact(self) -> None:
         self.assertEqual(tuple(base.__all__), _VALID_CONTRACT_NAMES)
@@ -125,18 +143,21 @@ class ExperimentContractTests(unittest.TestCase):
                 "application_reasoning_effort",
             ),
         }
-        for record, fields in expected_fields.items():
+        for record, expected in expected_fields.items():
             with self.subTest(record=record.__name__):
-                self.assertEqual(tuple(record.__dataclass_fields__), fields)
-                self.assertTrue(record.__dataclass_params__.frozen)
+                self.assertTrue(is_dataclass(record))
+                self.assertEqual(tuple(field.name for field in dataclass_fields(record)), expected)
+                params = vars(record).get("__dataclass_params__")
+                self.assertIsNotNone(params)
+                self.assertTrue(getattr(params, "frozen", False))
 
         input_spec = self.input(files=("z/file.txt", "a/file.txt"))
         self.assertEqual(input_spec.allowed_files, ("a/file.txt", "z/file.txt"))
         self.assertIsInstance(input_spec.allowed_files, tuple)
         with self.assertRaises(FrozenInstanceError):
-            input_spec.input_id = "changed"  # type: ignore[misc]
+            setattr(input_spec, "input_id", "changed")
 
-        arm = self.arm(builder_inputs=["input-a"])  # type: ignore[arg-type]
+        arm = self.arm(builder_inputs=cast(tuple[str, ...], ["input-a"]))
         self.assertEqual(arm.builder_inputs, ("input-a",))
         profile = self.profile()
         self.assertIsInstance(profile.inputs, tuple)
@@ -153,22 +174,25 @@ class ExperimentContractTests(unittest.TestCase):
         invalid_identifiers = ("", "A", "-leading", "bad space", "bad/slash", "x" * 65, 1, True)
         for invalid in invalid_identifiers:
             with self.subTest(invalid=invalid), self.assertRaises(ValueError):
-                ExperimentInputSpec(invalid, "files", None, "unavailable", ("a.txt",))  # type: ignore[arg-type]
+                # Preserve each invalid identifier value at the runtime validation boundary.
+                ExperimentInputSpec(cast(str, invalid), "files", None, "unavailable", ("a.txt",))
             with self.subTest(profile_id=invalid), self.assertRaises(ValueError):
-                ExperimentProfile(1, invalid, "benchmark-a", (self.input(),), (self.arm(),))  # type: ignore[arg-type]
+                ExperimentProfile(1, cast(str, invalid), "benchmark-a", (self.input(),), (self.arm(),))
             with self.subTest(arm_id=invalid), self.assertRaises(ValueError):
-                ExperimentArm(invalid, ("input-a",))  # type: ignore[arg-type]
+                ExperimentArm(cast(str, invalid), ("input-a",))
 
         for invalid in ("", "A", "bad space", "x" * 65, 1, True):
             with self.subTest(benchmark=invalid), self.assertRaises(ValueError):
-                ExperimentProfile(1, "profile-a", invalid, (self.input(),), (self.arm(),))  # type: ignore[arg-type]
+                ExperimentProfile(1, "profile-a", cast(str, invalid), (self.input(),), (self.arm(),))
         for invalid in ("", "A", "bad space", "x" * 65, 1, True):
             with self.subTest(builder_input=invalid), self.assertRaises((TypeError, ValueError)):
-                ExperimentArm("arm-a", (invalid,))  # type: ignore[arg-type]
+                ExperimentArm("arm-a", (cast(str, invalid),))
 
         for schema_version in (0, 2, -1, True, 1.0, "1"):
             with self.subTest(schema_version=schema_version), self.assertRaises((TypeError, ValueError)):
-                ExperimentProfile(schema_version, "profile-a", "benchmark-a", (self.input(),), (self.arm(),))  # type: ignore[arg-type]
+                ExperimentProfile(
+                    cast(int, schema_version), "profile-a", "benchmark-a", (self.input(),), (self.arm(),)
+                )
 
         for source_revision, revision_status in (
             (None, "available"),
@@ -186,7 +210,7 @@ class ExperimentContractTests(unittest.TestCase):
 
         for digest in ("A" * 64, "g" * 64, "a" * 63, "a" * 65, 1):
             with self.subTest(digest=digest), self.assertRaises(ValueError):
-                ExperimentInputSpec("input-a", "files", None, "unavailable", ("a.txt",), digest)  # type: ignore[arg-type]
+                ExperimentInputSpec("input-a", "files", None, "unavailable", ("a.txt",), cast(str, digest))
 
     def test_allowed_file_paths_reject_unsafe_forms_and_collisions(self) -> None:
         invalid_paths = (
@@ -211,9 +235,9 @@ class ExperimentContractTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.input(files=())
         with self.assertRaises(TypeError):
-            self.input(files=("a.txt", 3))  # type: ignore[arg-type]
+            self.input(files=cast(tuple[str, ...], ("a.txt", 3)))
         with self.assertRaises(TypeError):
-            ExperimentInputSpec("input-a", "files", None, "unavailable", "a.txt")  # type: ignore[arg-type]
+            ExperimentInputSpec("input-a", "files", None, "unavailable", cast(tuple[str, ...], "a.txt"))
 
         collision_cases = (
             ("A.txt", "a.txt"),
@@ -252,22 +276,34 @@ class ExperimentContractTests(unittest.TestCase):
             ExperimentArm("arm-a", ("input-a", "input-a"))
 
         with self.assertRaises(TypeError):
-            ExperimentProfile(1, "profile-a", "benchmark-a", (object(),), (self.arm(),))  # type: ignore[arg-type]
+            ExperimentProfile(
+                1,
+                "profile-a",
+                "benchmark-a",
+                cast(tuple[ExperimentInputSpec, ...], (object(),)),
+                (self.arm(),),
+            )
         with self.assertRaises(TypeError):
-            ExperimentProfile(1, "profile-a", "benchmark-a", (first,), (object(),))  # type: ignore[arg-type]
+            ExperimentProfile(
+                1,
+                "profile-a",
+                "benchmark-a",
+                (first,),
+                cast(tuple[ExperimentArm, ...], (object(),)),
+            )
 
     def test_loaded_profile_and_run_summary_normalize_paths_and_validate_counts(self) -> None:
         profile = self.profile()
-        loaded = LoadedExperimentProfile(profile, "profiles/profile.json", _DIGEST)
+        loaded = LoadedExperimentProfile(profile, Path("profiles/profile.json"), _DIGEST)
         self.assertEqual(loaded.source, Path("profiles/profile.json"))
         with self.assertRaises(FrozenInstanceError):
-            loaded.source = Path("changed")  # type: ignore[misc]
+            setattr(loaded, "source", Path("changed"))
         with self.assertRaises(TypeError):
-            LoadedExperimentProfile(object(), Path("profile.json"), _DIGEST)  # type: ignore[arg-type]
+            LoadedExperimentProfile(cast(ExperimentProfile, object()), Path("profile.json"), _DIGEST)
         with self.assertRaises(ValueError):
             LoadedExperimentProfile(profile, Path("profile.json"), "A" * 64)
 
-        summary = ExperimentRunSummary("profile-a", "benchmark-a", "out", "runtime", "completed", 2, 3, 6)
+        summary = ExperimentRunSummary("profile-a", "benchmark-a", Path("out"), Path("runtime"), "completed", 2, 3, 6)
         self.assertEqual(summary.out_dir, Path("out"))
         self.assertEqual(summary.runtime_root, Path("runtime"))
         for status in ("completed", "failed", "interrupted"):
@@ -280,36 +316,43 @@ class ExperimentContractTests(unittest.TestCase):
                 ExperimentRunSummary("profile-a", "benchmark-a", Path("out"), Path("runtime"), status, 0, 0, 0)
         for counts in ((-1, 0, 0), (0, -1, 0), (0, 0, -1), (1, 1, 2), (True, 1, 0)):
             with self.subTest(counts=counts), self.assertRaises((TypeError, ValueError)):
-                ExperimentRunSummary("profile-a", "benchmark-a", Path("out"), Path("runtime"), "failed", *counts)  # type: ignore[arg-type]
+                ExperimentRunSummary(
+                    "profile-a",
+                    "benchmark-a",
+                    Path("out"),
+                    Path("runtime"),
+                    "failed",
+                    *counts,
+                )
 
     def test_run_config_is_shared_and_rejects_invalid_values(self) -> None:
         config = self.config()
         self.assertEqual(config.builder_timeout_seconds, 1.0)
         self.assertEqual(config.application_network_enabled, True)
         with self.assertRaises(FrozenInstanceError):
-            config.limit = 2  # type: ignore[misc]
+            setattr(config, "limit", 2)
 
         for field in ("builder_executor", "application_executor", "evaluator"):
-            for value in ("", "UPPER", "bad value", "x" * 65, True):
-                with self.subTest(field=field, value=value), self.assertRaises(ValueError):
-                    self.config(**{field: value})
+            for identifier_value in ("", "UPPER", "bad value", "x" * 65, True):
+                with self.subTest(field=field, value=identifier_value), self.assertRaises(ValueError):
+                    self.config(**{field: identifier_value})
         for field in ("builder_model", "application_model"):
-            for value in ("", " ", 3, True):
-                with self.subTest(field=field, value=value), self.assertRaises(ValueError):
-                    self.config(**{field: value})
+            for model_value in ("", " ", 3, True):
+                with self.subTest(field=field, value=model_value), self.assertRaises(ValueError):
+                    self.config(**{field: model_value})
         for field in ("builder_timeout_seconds", "application_timeout_seconds"):
-            for value in (0, -1, math.nan, math.inf, -math.inf, True, "1"):
-                with self.subTest(field=field, value=value), self.assertRaises((TypeError, ValueError)):
-                    self.config(**{field: value})
+            for timeout_value in (0, -1, math.nan, math.inf, -math.inf, True, "1"):
+                with self.subTest(field=field, value=timeout_value), self.assertRaises((TypeError, ValueError)):
+                    self.config(**{field: timeout_value})
         for field in ("builder_network_enabled", "application_network_enabled"):
             with self.subTest(field=field), self.assertRaises(TypeError):
                 self.config(**{field: 1})
-        for value in (0, -1, True, 1.0, "1"):
-            with self.subTest(limit=value), self.assertRaises((TypeError, ValueError)):
-                self.config(limit=value)
-        for value in (-1, 2**63, True, 1.0, "1"):
-            with self.subTest(order_seed=value), self.assertRaises((TypeError, ValueError)):
-                self.config(order_seed=value)
+        for limit_value in (0, -1, True, 1.0, "1"):
+            with self.subTest(limit=limit_value), self.assertRaises((TypeError, ValueError)):
+                self.config(limit=limit_value)
+        for seed_value in (-1, 2**63, True, 1.0, "1"):
+            with self.subTest(order_seed=seed_value), self.assertRaises((TypeError, ValueError)):
+                self.config(order_seed=seed_value)
         self.assertEqual(self.config(order_seed=2**63 - 1).order_seed, 2**63 - 1)
 
 

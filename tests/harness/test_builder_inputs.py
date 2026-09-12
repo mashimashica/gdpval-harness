@@ -9,10 +9,11 @@ import tempfile
 import unittest
 from dataclasses import FrozenInstanceError, replace
 from pathlib import Path
+from typing import cast
 from unittest.mock import patch
 
 import gdpval_harness.builders.inputs as inputs_module
-from gdpval_harness.builders.base import canonical_builder_input_manifest_bytes
+from gdpval_harness.builders.base import BuilderInputBundle, canonical_builder_input_manifest_bytes
 from gdpval_harness.builders.inputs import (
     StagedBuilderInput,
     load_builder_input_bundle,
@@ -31,7 +32,9 @@ class BuilderInputTests(unittest.TestCase):
         (source / "nested" / "c.bin").write_bytes(b"\x00charlie\xff")
         return source
 
-    def _bundle(self, source: Path, *, input_id: str = "condition-secret", revision: str | None = None):
+    def _bundle(
+        self, source: Path, *, input_id: str = "condition-secret", revision: str | None = None
+    ) -> BuilderInputBundle:
         return load_builder_input_bundle(
             source,
             input_id=input_id,
@@ -40,7 +43,7 @@ class BuilderInputTests(unittest.TestCase):
             source_revision=revision,
         )
 
-    def _staged(self, root: Path):
+    def _staged(self, root: Path) -> tuple[Path, Path, tuple[StagedBuilderInput, ...]]:
         source = self._source(root)
         bundle = self._bundle(source)
         workspace = root / "workspace"
@@ -101,7 +104,8 @@ class BuilderInputTests(unittest.TestCase):
                     source,
                     input_id="id",
                     input_type="type",
-                    allowed_files="a.txt",  # type: ignore[arg-type]
+                    # Preserve the invalid runtime string at the allowlist boundary.
+                    allowed_files=cast(tuple[str, ...], "a.txt"),
                 )
 
     def test_path_component_collisions_are_rejected_for_sources_and_forged_evidence(self) -> None:
@@ -361,7 +365,7 @@ class BuilderInputTests(unittest.TestCase):
         record = StagedBuilderInput("id", "reference_files/builder-inputs/input-001", [item])
         self.assertIsInstance(record.materialized_files, tuple)
         with self.assertRaises(FrozenInstanceError):
-            record.input_id = "changed"  # type: ignore[misc]
+            setattr(record, "input_id", "changed")
 
     def test_verify_accepts_exact_tree_and_rejects_mutations(self) -> None:
         def mutate(kind: str) -> None:

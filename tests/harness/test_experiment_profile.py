@@ -9,10 +9,11 @@ import os
 import subprocess
 import tempfile
 import unittest
-from collections.abc import Iterator, Mapping
+from collections.abc import Iterator, Mapping, MutableMapping
 from pathlib import Path
 from subprocess import CompletedProcess
 from types import MappingProxyType
+from typing import cast
 from unittest.mock import Mock, patch
 
 import gdpval_harness.experiments.profile as profile_module
@@ -129,7 +130,13 @@ class ExperimentProfileLoaderTests(unittest.TestCase):
                     self.assertNotIn("must not echo", str(error.exception))
 
             nested_unknown = self._payload()
-            nested_unknown["inputs"] = [dict(nested_unknown["inputs"][0], extra="unknown")]  # type: ignore[index]
+            nested_inputs_value = nested_unknown["inputs"]
+            if not isinstance(nested_inputs_value, list) or not nested_inputs_value:
+                raise AssertionError("expected a non-empty input list")
+            first_input = nested_inputs_value[0]
+            if not isinstance(first_input, dict) or any(not isinstance(key, str) for key in first_input):
+                raise AssertionError("expected an input object with string keys")
+            nested_unknown["inputs"] = [dict(first_input, extra="unknown")]
             path = root / "nested-unknown.json"
             path.write_text(json.dumps(nested_unknown), encoding="utf-8")
             with self.assertRaises(ValueError):
@@ -162,10 +169,11 @@ class ExperimentProfileLoaderTests(unittest.TestCase):
             profile = self._profile()
             for bindings in ({}, {"input-a": source, "extra": source}, _DuplicateKeyMapping(source)):
                 with self.subTest(bindings=bindings), self.assertRaises(ValueError):
-                    load_experiment_inputs(profile, bindings)  # type: ignore[arg-type]
+                    load_experiment_inputs(profile, bindings)
 
             with self.assertRaises(TypeError):
-                load_experiment_inputs(profile, [("input-a", source)])  # type: ignore[arg-type]
+                # Preserve the invalid runtime binding type for the loader boundary.
+                load_experiment_inputs(profile, cast(Mapping[str, Path], [("input-a", source)]))
 
     def test_unavailable_input_uses_only_explicit_allowlist_and_returns_mapping_proxy(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -182,7 +190,8 @@ class ExperimentProfileLoaderTests(unittest.TestCase):
             self.assertEqual(bundle.manifest.source_revision, None)
             self.assertEqual(bundle.manifest.revision_status, "unavailable")
             with self.assertRaises(TypeError):
-                bundles["input-b"] = bundle  # type: ignore[index]
+                # Preserve the immutable mapping boundary at runtime.
+                cast(MutableMapping[str, BuilderInputBundle], bundles)["input-b"] = bundle
 
     def test_available_revision_checks_exact_git_head_before_loading(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -196,7 +205,7 @@ class ExperimentProfileLoaderTests(unittest.TestCase):
                 CompletedProcess([], 0, stdout=b"allowed", stderr=b""),
             ]
 
-            with patch.object(profile_module.subprocess, "run", side_effect=completed) as git_run:
+            with patch("gdpval_harness.experiments.profile.subprocess.run", side_effect=completed) as git_run:
                 bundles = load_experiment_inputs(profile, {"input-a": source})
 
             self.assertEqual(git_run.call_count, 3)
@@ -242,7 +251,7 @@ class ExperimentProfileLoaderTests(unittest.TestCase):
                         bad_result,
                     ]
                     with (
-                        patch.object(profile_module.subprocess, "run", side_effect=results) as git_run,
+                        patch("gdpval_harness.experiments.profile.subprocess.run", side_effect=results) as git_run,
                         self.assertRaises(ValueError),
                     ):
                         load_experiment_inputs(profile, {"input-a": source})
@@ -309,7 +318,7 @@ class ExperimentProfileLoaderTests(unittest.TestCase):
                 CompletedProcess([], 0, stdout=("f" * 40) + "\n", stderr=""),
             ]
             with (
-                patch.object(profile_module.subprocess, "run", side_effect=results) as git_run,
+                patch("gdpval_harness.experiments.profile.subprocess.run", side_effect=results) as git_run,
                 patch.object(profile_module, "load_builder_input_bundle", wraps=load_builder_input_bundle) as loader,
                 self.assertRaises(ValueError),
             ):
@@ -331,7 +340,7 @@ class ExperimentProfileLoaderTests(unittest.TestCase):
                 with self.subTest(result=result):
                     loader = Mock(wraps=load_builder_input_bundle)
                     with (
-                        patch.object(profile_module.subprocess, "run", return_value=result) as git_run,
+                        patch("gdpval_harness.experiments.profile.subprocess.run", return_value=result) as git_run,
                         patch.object(profile_module, "load_builder_input_bundle", loader),
                         self.assertRaises(ValueError),
                     ):
@@ -341,7 +350,7 @@ class ExperimentProfileLoaderTests(unittest.TestCase):
 
             malformed_bytes = CompletedProcess([], 0, stdout=b"\xff\n", stderr=b"\xfe")
             with (
-                patch.object(profile_module.subprocess, "run", return_value=malformed_bytes),
+                patch("gdpval_harness.experiments.profile.subprocess.run", return_value=malformed_bytes),
                 self.assertRaises(ValueError),
             ):
                 load_experiment_inputs(profile, {"input-a": source})

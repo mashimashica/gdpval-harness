@@ -184,7 +184,7 @@ def execution_record(result: ExecutionResult) -> dict[str, object]:
     if not isinstance(result, ExecutionResult):
         raise TypeError("result must be an ExecutionResult")
     status = result.status.value if hasattr(result.status, "value") else result.status
-    record = {
+    record: dict[str, object] = {
         "status": str(status),
         "executor": result.executor,
         "executor_version": result.executor_version,

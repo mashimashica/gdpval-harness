@@ -69,7 +69,10 @@ class CodexExecutor(Executor):
         reasoning_effort: ReasoningEffortOption = None,
     ) -> None:
         self.network_enabled = network_enabled
-        self.command = command or os.getenv("GDPVAL_CODEX_COMMAND", "codex")
+        resolved_command = command or os.getenv("GDPVAL_CODEX_COMMAND", "codex")
+        if resolved_command is None:
+            raise RuntimeError("Codex command could not be resolved")
+        self.command = resolved_command
         self.reasoning_effort = validate_reasoning_effort(reasoning_effort)
         self._version: str | None = None
 

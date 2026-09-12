@@ -8,6 +8,7 @@ from __future__ import annotations
 import math
 import re
 import unicodedata
+from collections.abc import Iterable
 from dataclasses import dataclass
 from numbers import Real
 from pathlib import Path, PurePosixPath, PureWindowsPath
@@ -42,8 +43,10 @@ def _require_sha256(label: str, value: object) -> str:
 def _as_tuple(label: str, value: object) -> tuple[object, ...]:
     if isinstance(value, (str, bytes, bytearray)):
         raise TypeError(f"{label} must be a sequence")
+    if not isinstance(value, Iterable):
+        raise TypeError(f"{label} must be a sequence")
     try:
-        return tuple(value)  # type: ignore[arg-type]
+        return tuple(value)
     except TypeError as exc:
         raise TypeError(f"{label} must be a sequence") from exc
 
@@ -89,8 +92,10 @@ def _normalize_allowed_files(value: object) -> tuple[str, ...]:
     normalized_paths: list[str] = []
 
     for path in paths:
+        if not isinstance(path, str):
+            raise TypeError("experiment input allowed_files must contain strings")
         components = _validate_allowed_file_path(path)
-        normalized_path = path  # type: ignore[assignment]
+        normalized_path = path
         component_keys = tuple(_path_collision_key(component) for component in components)
 
         for depth, (component, component_key) in enumerate(zip(components, component_keys)):
@@ -227,20 +232,22 @@ class ExperimentProfile:
         _require_identifier("experiment profile_id", self.profile_id)
         _require_identifier("experiment benchmark", self.benchmark)
 
-        inputs = _as_tuple("experiment profile inputs", self.inputs)
-        if not inputs:
+        raw_inputs = _as_tuple("experiment profile inputs", self.inputs)
+        if not raw_inputs:
             raise ValueError("experiment profile inputs must be non-empty")
-        if any(not isinstance(item, ExperimentInputSpec) for item in inputs):
+        if any(not isinstance(item, ExperimentInputSpec) for item in raw_inputs):
             raise TypeError("experiment profile inputs must contain ExperimentInputSpec instances")
+        inputs = tuple(item for item in raw_inputs if isinstance(item, ExperimentInputSpec))
         input_ids = tuple(item.input_id for item in inputs)
         if len(input_ids) != len(set(input_ids)):
             raise ValueError("experiment profile input IDs must be unique")
 
-        arms = _as_tuple("experiment profile arms", self.arms)
-        if not arms:
+        raw_arms = _as_tuple("experiment profile arms", self.arms)
+        if not raw_arms:
             raise ValueError("experiment profile arms must be non-empty")
-        if any(not isinstance(item, ExperimentArm) for item in arms):
+        if any(not isinstance(item, ExperimentArm) for item in raw_arms):
             raise TypeError("experiment profile arms must contain ExperimentArm instances")
+        arms = tuple(item for item in raw_arms if isinstance(item, ExperimentArm))
         arm_ids = tuple(item.arm_id for item in arms)
         if len(arm_ids) != len(set(arm_ids)):
             raise ValueError("experiment profile arm IDs must be unique")

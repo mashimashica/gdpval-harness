@@ -20,7 +20,7 @@ import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
-from typing import Any, Mapping, Sequence
+from typing import Mapping, Sequence, TypeVar
 
 from gdpval_harness.benchmarks.base import Benchmark, BenchmarkTask
 from gdpval_harness.builders.base import (
@@ -180,14 +180,16 @@ def _validate_path_namespace(
             raise ValueError("planned roots must be separate from experiment input sources")
 
 
-def _require_instance(value: object, expected: type[Any], label: str) -> Any:
+_T = TypeVar("_T")
+
+
+def _require_instance(value: object, expected: type[object], label: str) -> None:
     if not isinstance(value, expected):
         raise TypeError(f"{label} must be a {expected.__name__}")
-    return value
 
 
-def _require_exact_result(value: object, expected: type[Any], label: str) -> Any:
-    if type(value) is not expected:
+def _require_exact_result(value: object, expected: type[_T], label: str) -> _T:
+    if type(value) is not expected or not isinstance(value, expected):
         raise TypeError(f"{label} must be exactly a {expected.__name__}")
     return value
 
@@ -413,7 +415,7 @@ def _manifest_payload(manifest: BuilderInputManifest) -> dict[str, object]:
 
 
 def _config_payload(config: ExperimentRunConfig) -> dict[str, object]:
-    payload = {
+    payload: dict[str, object] = {
         "builder_executor": config.builder_executor,
         "application_executor": config.application_executor,
         "evaluator": config.evaluator,
@@ -460,7 +462,7 @@ def _builder_descriptor(
     preflight: BuilderPreflightResult,
     config: ExperimentRunConfig,
 ) -> dict[str, object]:
-    descriptor = {
+    descriptor: dict[str, object] = {
         "id": _nullable_text(getattr(builder, "name", None)) or _nullable_text(preflight.name),
         "executor": _nullable_text(preflight.builder_executor),
         "executor_version": _nullable_text(preflight.builder_executor_version),
@@ -479,7 +481,7 @@ def _application_executor_descriptor(
     preflight: PreflightResult,
     config: ExperimentRunConfig,
 ) -> dict[str, object]:
-    descriptor = {
+    descriptor: dict[str, object] = {
         "id": _nullable_text(preflight.executor),
         "executor": _nullable_text(preflight.executor),
         "executor_version": _nullable_text(preflight.version),
@@ -826,7 +828,8 @@ def _validate_build_result(result: object, request: BuildRequest, builder: Build
     if tuple(result.inputs) != tuple(item.manifest for item in request.inputs):
         raise ValueError("builder returned mismatched input manifests")
     if result.status is BuildStatus.COMPLETED:
-        if type(result.bundle) is not InterventionBundle:
+        bundle = result.bundle
+        if bundle is None or type(bundle) is not InterventionBundle:
             raise TypeError("completed builder result must contain an exact InterventionBundle")
         if result.execution is None:
             raise ValueError("completed builder result must contain execution evidence")
@@ -835,7 +838,9 @@ def _validate_build_result(result: object, request: BuildRequest, builder: Build
             label="builder artifact root",
             directory=True,
         )
-        bundle_root = _canonical_existing(result.bundle.root, label="sealed builder bundle root", directory=True)
+        if bundle.root is None:
+            raise ValueError("completed builder result bundle must contain a filesystem root")
+        bundle_root = _canonical_existing(bundle.root, label="sealed builder bundle root", directory=True)
         if bundle_root.parent != artifact_root:
             raise ValueError("builder bundle root is outside the assigned artifact root")
     return result

@@ -63,7 +63,10 @@ class GDPvalEvaluatorTests(unittest.TestCase):
             self.assertEqual(evaluation.status, EvaluationStatus.EXTERNAL)
             self.assertEqual(evaluation.metrics, {})
             self.assertEqual(evaluation.outcomes, {})
-            self.assertIn("rubric/pairwise", evaluation.details["evaluation"])
+            evaluation_detail = evaluation.details["evaluation"]
+            if not isinstance(evaluation_detail, str):
+                raise AssertionError("expected a string evaluation detail")
+            self.assertIn("rubric/pairwise", evaluation_detail)
             self.assertEqual((destination / "submitted.txt").read_bytes(), b"submitted bytes")
             self.assertEqual((destination / "reference_files" / "source.txt").read_bytes(), b"reference bytes")
             finish = json.loads((destination / "finish_params.json").read_text(encoding="utf-8"))

@@ -73,6 +73,39 @@ class BenchmarkAbstractionTests(unittest.TestCase):
             benchmark.prepare()
             self.assertTrue(benchmark.is_prepared())
 
+    def test_gdpval_materialize_preserves_loaded_reference_sequences(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source = root / "source.txt"
+            source.write_text("materialized reference\n", encoding="utf-8")
+            dataset = root / "gdpval.jsonl"
+            dataset.write_text(
+                json.dumps(
+                    {
+                        "task_id": "task-1",
+                        "prompt": "Use the reference.",
+                        "reference_files": ["reference_files/input.txt"],
+                        "reference_file_urls": [str(source)],
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            benchmark = GDPvalBenchmark(
+                root=root,
+                dataset_path=dataset,
+                prepare_script=root / "missing-prepare.py",
+            )
+            task = benchmark.load_tasks(1)[0]
+
+            workspace = root / "workspace"
+            workspace.mkdir()
+            self.assertEqual(benchmark.materialize(task, workspace), ["reference_files/input.txt"])
+            self.assertEqual(
+                (workspace / "reference_files" / "input.txt").read_text(encoding="utf-8"),
+                "materialized reference\n",
+            )
+
     def test_gdpval_rejects_nonpositive_task_limit(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

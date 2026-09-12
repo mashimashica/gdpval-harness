@@ -10,9 +10,11 @@ import os
 import subprocess
 import tempfile
 import unittest
+from collections.abc import Iterator, Mapping
 from dataclasses import FrozenInstanceError
 from pathlib import Path
 from subprocess import CompletedProcess
+from typing import cast
 from unittest.mock import patch
 
 import gdpval_harness.provenance as provenance_module
@@ -30,11 +32,11 @@ _SHA1 = "0123456789abcdef0123456789abcdef01234567"
 _SHA256 = "0123456789abcdef" * 4
 
 
-class _ForbiddenMapping:
+class _ForbiddenMapping(Mapping[str, object]):
     def __getitem__(self, key: object) -> object:
         raise AssertionError(f"metadata key accessed: {key!r}")
 
-    def __iter__(self):
+    def __iter__(self) -> Iterator[str]:
         raise AssertionError("metadata iterated")
 
     def __len__(self) -> int:
@@ -64,9 +66,9 @@ class ProvenanceTests(unittest.TestCase):
         )
         self.assertEqual(RepositoryProvenance(_SHA256, "available", "unavailable").worktree_status, "unavailable")
         with self.assertRaises(FrozenInstanceError):
-            RepositoryProvenance(_SHA1, "available", "clean").commit = _SHA256  # type: ignore[misc]
+            setattr(RepositoryProvenance(_SHA1, "available", "clean"), "commit", _SHA256)
 
-        invalid = (
+        invalid: tuple[tuple[object, object, object], ...] = (
             (None, "available", "clean"),
             (None, [], "clean"),
             (None, "unavailable", []),
@@ -81,7 +83,8 @@ class ProvenanceTests(unittest.TestCase):
         )
         for values in invalid:
             with self.subTest(values=values), self.assertRaises(ValueError):
-                RepositoryProvenance(*values)  # type: ignore[arg-type]
+                # These values intentionally cross the runtime-invalid constructor boundary.
+                RepositoryProvenance(*cast(tuple[str | None, str, str], values))
 
     def test_canonical_json_hash_is_ordered_unicode_and_compact(self) -> None:
         first = {"z": ["é", 3], "a": {"b": True, "a": None}}
@@ -99,12 +102,12 @@ class ProvenanceTests(unittest.TestCase):
         self.assertEqual(encoded, '{"a":{"a":null,"b":true},"z":["é",3]}'.encode("utf-8"))
 
     def test_canonical_json_hash_rejects_nonfinite_and_arbitrary_values(self) -> None:
-        for value in (math.nan, math.inf, -math.inf):
-            with self.subTest(value=value), self.assertRaises(ValueError):
-                canonical_json_sha256(value)
-        for value in ({"bytes": b"secret"}, {"set": {1, 2}}, _StringSentinel()):
-            with self.subTest(value=type(value).__name__), self.assertRaises(TypeError):
-                canonical_json_sha256(value)
+        for nonfinite in (math.nan, math.inf, -math.inf):
+            with self.subTest(value=nonfinite), self.assertRaises(ValueError):
+                canonical_json_sha256(nonfinite)
+        for unsupported in ({"bytes": b"secret"}, {"set": {1, 2}}, _StringSentinel()):
+            with self.subTest(value=type(unsupported).__name__), self.assertRaises(TypeError):
+                canonical_json_sha256(unsupported)
 
     def test_task_hash_uses_only_exact_prompt_utf8_bytes(self) -> None:
         prompt = "héllo\n世界"
@@ -113,7 +116,8 @@ class ProvenanceTests(unittest.TestCase):
         self.assertEqual(task_sha256(TaskSpec("credential-task", prompt)), expected)
         self.assertNotEqual(task_sha256(TaskSpec("task-a", prompt + "!")), expected)
         with self.assertRaises(TypeError):
-            task_sha256(object())  # type: ignore[arg-type]
+            # Preserve the invalid runtime object at the task hashing boundary.
+            task_sha256(cast(TaskSpec, object()))
 
         class ChildTask(TaskSpec):
             pass
@@ -121,7 +125,8 @@ class ProvenanceTests(unittest.TestCase):
         with self.assertRaises(TypeError):
             task_sha256(ChildTask("task", prompt))
         with self.assertRaises(TypeError):
-            task_sha256(TaskSpec("task", 3))  # type: ignore[arg-type]
+            # Preserve the invalid runtime prompt at the task hashing boundary.
+            task_sha256(TaskSpec("task", cast(str, 3)))
 
     def test_repository_provenance_observes_clean_dirty_and_unavailable(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -153,7 +158,7 @@ class ProvenanceTests(unittest.TestCase):
         status = CompletedProcess([], 0, stdout=" M private-name.txt\n", stderr="secret status stderr")
         original_optional = os.environ.get("GIT_OPTIONAL_LOCKS")
         original_prompt = os.environ.get("GIT_TERMINAL_PROMPT")
-        with patch.object(provenance_module.subprocess, "run", side_effect=[head, status]) as run:
+        with patch("gdpval_harness.provenance.subprocess.run", side_effect=[head, status]) as run:
             observed = repository_provenance(start)
 
         self.assertEqual(observed, RepositoryProvenance(_SHA1, "available", "dirty"))
@@ -196,14 +201,14 @@ class ProvenanceTests(unittest.TestCase):
             CompletedProcess([], 0, stdout="malformed-head\nextra", stderr=""),
         )
         for head in cases:
-            with self.subTest(head=head), patch.object(provenance_module.subprocess, "run", return_value=head) as run:
+            with self.subTest(head=head), patch("gdpval_harness.provenance.subprocess.run", return_value=head) as run:
                 observed = repository_provenance(start)
             self.assertEqual(observed, RepositoryProvenance(None, "unavailable", "unavailable"))
             self.assertEqual(run.call_count, 1)
 
         head = CompletedProcess([], 0, stdout=f"{_SHA1}\n", stderr="")
         status_failure = CompletedProcess([], 1, stdout="", stderr="status secret")
-        with patch.object(provenance_module.subprocess, "run", side_effect=[head, status_failure]) as run:
+        with patch("gdpval_harness.provenance.subprocess.run", side_effect=[head, status_failure]) as run:
             observed = repository_provenance(start)
         self.assertEqual(observed, RepositoryProvenance(_SHA1, "available", "unavailable"))
         self.assertEqual(run.call_count, 2)
@@ -222,7 +227,7 @@ class ProvenanceTests(unittest.TestCase):
             finished_at="2026-01-01T00:00:01Z",
             exit_code=0,
             output_text="secret output text",
-            metadata=_ForbiddenMapping(),  # type: ignore[arg-type]
+            metadata=_ForbiddenMapping(),
         )
 
         record = execution_record(result)
@@ -255,7 +260,8 @@ class ProvenanceTests(unittest.TestCase):
         self.assertNotIn("secret output text", repr(record))
 
         with self.assertRaises(TypeError):
-            execution_record(object())  # type: ignore[arg-type]
+            # Preserve the invalid runtime object at the execution record boundary.
+            execution_record(cast(ExecutionResult, object()))
 
     @staticmethod
     def _git(root: Path, *arguments: str) -> CompletedProcess[bytes]:

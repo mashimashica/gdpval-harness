@@ -12,7 +12,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from numbers import Real
 from pathlib import Path
-from typing import Mapping
+from typing import Mapping, TextIO
 
 from gdpval_harness.benchmarks.base import Benchmark
 from gdpval_harness.evaluators.base import (
@@ -86,7 +86,7 @@ def _fsync_directory(path: Path) -> None:
         os.close(descriptor)
 
 
-def _append_jsonl(handle, payload: Mapping[str, object]) -> None:
+def _append_jsonl(handle: TextIO, payload: Mapping[str, object]) -> None:
     handle.write(json.dumps(payload, sort_keys=True) + "\n")
     handle.flush()
     os.fsync(handle.fileno())
@@ -663,7 +663,7 @@ def run_benchmark(
                         phase="intervention_apply",
                         interrupted=True,
                     )
-                    row = {
+                    failure_row: dict[str, object] = {
                         "task_id": task.execution.task_id,
                         "task_sha256": task_hashes[task.execution.task_id],
                         "materialized": materialized,
@@ -671,10 +671,10 @@ def run_benchmark(
                         "execution": None,
                         "evaluation": None,
                     }
-                    _write_json(layout.executor_dir.parent / "result.json", row)
-                    _append_jsonl(results_handle, row)
-                    rows.append(row)
-                    record_application_run_id(row)
+                    _write_json(layout.executor_dir.parent / "result.json", failure_row)
+                    _append_jsonl(results_handle, failure_row)
+                    rows.append(failure_row)
+                    record_application_run_id(failure_row)
                     base_metadata["failure"] = {
                         "phase": "intervention_apply",
                         "exception_type": type(exc).__name__,
@@ -689,7 +689,7 @@ def run_benchmark(
                         application_run_id=application_run_id,
                         phase="intervention_apply",
                     )
-                    row = {
+                    row: dict[str, object] = {
                         "task_id": task.execution.task_id,
                         "task_sha256": task_hashes[task.execution.task_id],
                         "materialized": materialized,
@@ -720,7 +720,7 @@ def run_benchmark(
                 result = executor.execute(request)
 
                 def persist_row(evaluation_payload: dict[str, object]) -> dict[str, object]:
-                    row = {
+                    row: dict[str, object] = {
                         "task_id": task.execution.task_id,
                         "task_sha256": task_hashes[task.execution.task_id],
                         "materialized": materialized,
