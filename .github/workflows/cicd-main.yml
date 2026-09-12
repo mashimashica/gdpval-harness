@@ -39,6 +39,7 @@ permissions:
 
 jobs:
   ephemeral-runner-routing:
+    if: github.repository == 'NVIDIA-NeMo/Gym'
     uses: NVIDIA-NeMo/FW-CI-templates/.github/workflows/_ephemeral_runner_routing.yml@4fe957d4ea5816af1d67fae130bbab4b434c10b3 # v1.9.2
     with:
       lane: ${{ vars.NEMO_CI_EPHEMERAL_LANE }}
@@ -48,6 +49,7 @@ jobs:
 
   pre-flight:
     needs: [ephemeral-runner-routing]
+    if: github.repository == 'NVIDIA-NeMo/Gym'
     uses: NVIDIA-NeMo/FW-CI-templates/.github/workflows/_cicd_preflight.yml@d0878a142525ff79366ca96fbc0b306cd8d64670 # v1.9.0
     with:
       default_runner_prefix: ${{ vars.DEFAULT_RUNNER_PREFIX }}
@@ -63,6 +65,7 @@ jobs:
   classify_changes:
     name: Classify changes
     needs: [pre-flight]
+    if: github.repository == 'NVIDIA-NeMo/Gym'
     runs-on: ubuntu-latest
     outputs:
       docs_only: ${{ steps.changes.outputs.docs_only }}
@@ -88,7 +91,7 @@ jobs:
   unit_tests:
     name: Unit tests
     needs: [pre-flight, classify_changes]
-    if: needs.classify_changes.outputs.docs_only != 'true'
+    if: github.repository == 'NVIDIA-NeMo/Gym' && needs.classify_changes.outputs.docs_only != 'true'
     uses: ./.github/workflows/unit-tests.yml
     with:
       base-ref: ${{ needs.pre-flight.outputs.base_ref }}
@@ -107,6 +110,7 @@ jobs:
     # rejecting cancellation or failed dependencies explicitly.
     if: >-
       ${{
+        github.repository == 'NVIDIA-NeMo/Gym' &&
         always() && !cancelled() &&
         needs.classify_changes.outputs.is_nightly == 'true' &&
         needs.pre-flight.result == 'success' &&
@@ -177,6 +181,7 @@ jobs:
     # the push itself failed.
     if: >-
       ${{
+        github.repository == 'NVIDIA-NeMo/Gym' &&
         always() && !cancelled() &&
         needs.classify_changes.outputs.is_nightly == 'true' &&
         needs.pre-flight.result == 'success' &&
@@ -231,6 +236,7 @@ jobs:
     # Remove the leading `false &&` once the provider is healthy again.
     if: >-
       ${{
+        github.repository == 'NVIDIA-NeMo/Gym' &&
         always() && !cancelled() &&
         false &&
         needs.classify_changes.outputs.is_nightly == 'true' &&
@@ -280,7 +286,7 @@ jobs:
 
   Nemo_CICD_Test:
     needs: [pre-flight, classify_changes, unit_tests, container_build, gpu_e2e_tests, provider_e2e_tests]
-    if: always() && !cancelled()
+    if: github.repository == 'NVIDIA-NeMo/Gym' && always() && !cancelled()
     runs-on: ubuntu-latest
     steps:
       - name: Check test results
@@ -369,6 +375,7 @@ jobs:
     # for exactly the failure class this notifier exists to catch.
     if: >-
       ${{
+        github.repository == 'NVIDIA-NeMo/Gym' &&
         always() && !cancelled() &&
         (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') &&
         needs.Nemo_CICD_Test.result == 'failure' &&

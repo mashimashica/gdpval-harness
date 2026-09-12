@@ -62,13 +62,14 @@ concurrency:
 
 jobs:
   pre-flight:
-    if: github.event_name != 'workflow_dispatch'
+    if: github.repository == 'NVIDIA-NeMo/Gym' && github.event_name != 'workflow_dispatch'
     uses: NVIDIA-NeMo/FW-CI-templates/.github/workflows/_cicd_preflight.yml@cf5acebace78c7c339bc1f804357a991336f1c4d # v1.8.10
 
   release:
     needs: [pre-flight]
     if: |
-      !cancelled() && !failure()
+      github.repository == 'NVIDIA-NeMo/Gym'
+      && !cancelled() && !failure()
       && !(needs.pre-flight.outputs.docs_only == 'true'
            || needs.pre-flight.outputs.is_deployment_workflow == 'true')
     uses: NVIDIA-NeMo/FW-CI-templates/.github/workflows/_release_library.yml@f7af92c4d1caea5a58577ce4ac5314f7de1bc5d4 # v1.4.3
@@ -93,7 +94,7 @@ jobs:
 
   release-summary:
     needs: [pre-flight, release]
-    if: ${{ !cancelled() }}
+    if: ${{ github.repository == 'NVIDIA-NeMo/Gym' && !cancelled() }}
     runs-on: ubuntu-latest
     steps:
       - name: Result
