@@ -9,8 +9,8 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from gdpval_harness.benchmarks.base import Benchmark, BenchmarkTask
-from gdpval_harness.builders.base import (
+from eval_harness.benchmarks.base import Benchmark, BenchmarkTask
+from eval_harness.builders.base import (
     Builder,
     BuilderInputBundle,
     BuilderPreflightResult,
@@ -19,8 +19,8 @@ from gdpval_harness.builders.base import (
     BuildResult,
     BuildStatus,
 )
-from gdpval_harness.builders.inputs import load_builder_input_bundle
-from gdpval_harness.evaluators.base import (
+from eval_harness.builders.inputs import load_builder_input_bundle
+from eval_harness.evaluators.base import (
     EvaluationPlan,
     EvaluationRequest,
     EvaluationResult,
@@ -29,7 +29,7 @@ from gdpval_harness.evaluators.base import (
     EvaluatorPreflightResult,
     EvaluatorType,
 )
-from gdpval_harness.executors.base import (
+from eval_harness.executors.base import (
     ExecutionRequest,
     ExecutionResult,
     ExecutionStatus,
@@ -37,7 +37,7 @@ from gdpval_harness.executors.base import (
     PreflightResult,
     TaskSpec,
 )
-from gdpval_harness.experiments.base import (
+from eval_harness.experiments.base import (
     ExperimentArm,
     ExperimentInputSpec,
     ExperimentProfile,
@@ -45,10 +45,10 @@ from gdpval_harness.experiments.base import (
     ExperimentRunSummary,
     LoadedExperimentProfile,
 )
-from gdpval_harness.experiments.runner import _make_schedule, _validate_build_result, run_builder_experiment
-from gdpval_harness.interventions.agent_skill import load_agent_skill_bundle
-from gdpval_harness.interventions.base import InterventionBundle
-from gdpval_harness.provenance import canonical_json_sha256
+from eval_harness.experiments.runner import _make_schedule, _validate_build_result, run_builder_experiment
+from eval_harness.interventions.agent_skill import load_agent_skill_bundle
+from eval_harness.interventions.base import InterventionBundle
+from eval_harness.provenance import canonical_json_sha256
 
 
 class _Benchmark(Benchmark):
@@ -347,15 +347,15 @@ class BuilderExperimentRunnerTests(unittest.TestCase):
         application_ids = application_ids or [f"application-run-{index}" for index in range(1, 100)]
         with (
             patch(
-                "gdpval_harness.experiments.runner.load_experiment_inputs",
+                "eval_harness.experiments.runner.load_experiment_inputs",
                 return_value={"input-guide": source_bundle},
             ) as input_loader,
             patch(
-                "gdpval_harness.experiments.runner.secrets.token_hex",
+                "eval_harness.experiments.runner.secrets.token_hex",
                 side_effect=schedule_ids,
             ),
             patch(
-                "gdpval_harness.runner.secrets.token_urlsafe",
+                "eval_harness.runner.secrets.token_urlsafe",
                 side_effect=application_ids,
             ),
         ):
@@ -595,7 +595,7 @@ class BuilderExperimentRunnerTests(unittest.TestCase):
                 root, fail_plan_at=2
             )
             with patch(
-                "gdpval_harness.experiments.runner.load_experiment_inputs",
+                "eval_harness.experiments.runner.load_experiment_inputs",
                 return_value={"input-guide": source_bundle},
             ):
                 with self.assertRaisesRegex(ValueError, "private rubric sentinel"):
@@ -621,7 +621,7 @@ class BuilderExperimentRunnerTests(unittest.TestCase):
                 root, task_count=0
             )
             with patch(
-                "gdpval_harness.experiments.runner.load_experiment_inputs",
+                "eval_harness.experiments.runner.load_experiment_inputs",
                 return_value={"input-guide": source_bundle},
             ):
                 with self.assertRaisesRegex(ValueError, "no selected tasks"):
@@ -655,15 +655,15 @@ class BuilderExperimentRunnerTests(unittest.TestCase):
             benchmark.tasks = (BenchmarkTask(TaskSpec("unsafe/task", "prompt"), evaluation={}),)
             with (
                 patch(
-                    "gdpval_harness.experiments.runner.load_experiment_inputs",
+                    "eval_harness.experiments.runner.load_experiment_inputs",
                     return_value={"input-guide": source_bundle},
                 ),
                 patch(
-                    "gdpval_harness.experiments.runner.secrets.token_hex",
+                    "eval_harness.experiments.runner.secrets.token_hex",
                     side_effect=[f"{index:032x}" for index in range(1, 100)],
                 ),
                 patch(
-                    "gdpval_harness.runner.secrets.token_urlsafe",
+                    "eval_harness.runner.secrets.token_urlsafe",
                     side_effect=[f"application-run-{index}" for index in range(1, 100)],
                 ),
             ):
@@ -687,7 +687,7 @@ class BuilderExperimentRunnerTests(unittest.TestCase):
             root = Path(temporary)
             profile, config, benchmark, _, _, _, _ = self._fixture(root)
             with patch(
-                "gdpval_harness.experiments.runner.secrets.token_hex",
+                "eval_harness.experiments.runner.secrets.token_hex",
                 side_effect=[f"first-{index:028x}" for index in range(4)],
             ):
                 first = _make_schedule(
@@ -698,7 +698,7 @@ class BuilderExperimentRunnerTests(unittest.TestCase):
                     root / "first-runtime",
                 )
             with patch(
-                "gdpval_harness.experiments.runner.secrets.token_hex",
+                "eval_harness.experiments.runner.secrets.token_hex",
                 side_effect=[f"second-{index:027x}" for index in range(4)],
             ):
                 second = _make_schedule(
@@ -724,15 +724,15 @@ class BuilderExperimentRunnerTests(unittest.TestCase):
             builder = _Builder(fail_on_call=2)
             with (
                 patch(
-                    "gdpval_harness.experiments.runner.load_experiment_inputs",
+                    "eval_harness.experiments.runner.load_experiment_inputs",
                     return_value={"input-guide": source_bundle},
                 ),
                 patch(
-                    "gdpval_harness.experiments.runner.secrets.token_hex",
+                    "eval_harness.experiments.runner.secrets.token_hex",
                     side_effect=[f"{index:032x}" for index in range(1, 100)],
                 ),
                 patch(
-                    "gdpval_harness.runner.secrets.token_urlsafe",
+                    "eval_harness.runner.secrets.token_urlsafe",
                     side_effect=[f"application-run-{index}" for index in range(1, 100)],
                 ),
             ):
@@ -790,15 +790,15 @@ class BuilderExperimentRunnerTests(unittest.TestCase):
             builder = _Builder(interrupt_on_call=1)
             with (
                 patch(
-                    "gdpval_harness.experiments.runner.load_experiment_inputs",
+                    "eval_harness.experiments.runner.load_experiment_inputs",
                     return_value={"input-guide": source_bundle},
                 ),
                 patch(
-                    "gdpval_harness.experiments.runner.secrets.token_hex",
+                    "eval_harness.experiments.runner.secrets.token_hex",
                     side_effect=[f"{index:032x}" for index in range(1, 100)],
                 ),
                 patch(
-                    "gdpval_harness.runner.secrets.token_urlsafe",
+                    "eval_harness.runner.secrets.token_urlsafe",
                     side_effect=[f"application-run-{index}" for index in range(1, 100)],
                 ),
             ):
@@ -827,15 +827,15 @@ class BuilderExperimentRunnerTests(unittest.TestCase):
             application = _ApplicationExecutor(interrupt_on_call=1)
             with (
                 patch(
-                    "gdpval_harness.experiments.runner.load_experiment_inputs",
+                    "eval_harness.experiments.runner.load_experiment_inputs",
                     return_value={"input-guide": source_bundle},
                 ),
                 patch(
-                    "gdpval_harness.experiments.runner.secrets.token_hex",
+                    "eval_harness.experiments.runner.secrets.token_hex",
                     side_effect=[f"{index:032x}" for index in range(1, 100)],
                 ),
                 patch(
-                    "gdpval_harness.runner.secrets.token_urlsafe",
+                    "eval_harness.runner.secrets.token_urlsafe",
                     side_effect=[f"application-run-{index}" for index in range(1, 100)],
                 ),
             ):
@@ -867,15 +867,15 @@ class BuilderExperimentRunnerTests(unittest.TestCase):
             application = _ApplicationExecutor(fail_on_call=2)
             with (
                 patch(
-                    "gdpval_harness.experiments.runner.load_experiment_inputs",
+                    "eval_harness.experiments.runner.load_experiment_inputs",
                     return_value={"input-guide": source_bundle},
                 ),
                 patch(
-                    "gdpval_harness.experiments.runner.secrets.token_hex",
+                    "eval_harness.experiments.runner.secrets.token_hex",
                     side_effect=[f"{index:032x}" for index in range(1, 100)],
                 ),
                 patch(
-                    "gdpval_harness.runner.secrets.token_urlsafe",
+                    "eval_harness.runner.secrets.token_urlsafe",
                     side_effect=[f"application-run-{index}" for index in range(1, 100)],
                 ),
             ):
@@ -923,7 +923,7 @@ class BuilderExperimentRunnerTests(unittest.TestCase):
                     out_dir.mkdir()
                     (out_dir / "sentinel").write_text("keep", encoding="utf-8")
                 loader = patch(
-                    "gdpval_harness.experiments.runner.load_experiment_inputs",
+                    "eval_harness.experiments.runner.load_experiment_inputs",
                     side_effect=ValueError("input hash sentinel"),
                 )
                 with loader as mocked_loader:

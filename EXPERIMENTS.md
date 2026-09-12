@@ -1,6 +1,6 @@
 # Experiment conditions
 
-`gdpval-harness` treats an experiment condition as an external intervention applied to a policy run. It is deliberately separate from the GDPval task, executor, model provider, and judge.
+`eval-harness` treats an experiment condition as an external intervention applied to a policy run. It is deliberately separate from the GDPval task, executor, model provider, and judge.
 
 The harness does not know what `plain`, `alps`, `prompt-v2`, or any other condition means. A condition label is provenance only. Optional condition instructions are supplied explicitly through a text file and are supported only by local policy executors.
 

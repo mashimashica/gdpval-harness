@@ -9,10 +9,10 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from gdpval_harness.benchmarks.aime26 import AIME26Benchmark
-from gdpval_harness.evaluators.aime26 import AIME26Evaluator
-from gdpval_harness.evaluators.base import EvaluationCandidate, EvaluationRequest, EvaluationStatus, EvaluatorType
-from gdpval_harness.executors.base import ExecutionResult, ExecutionStatus
+from eval_harness.benchmarks.aime26 import AIME26Benchmark
+from eval_harness.evaluators.aime26 import AIME26Evaluator
+from eval_harness.evaluators.base import EvaluationCandidate, EvaluationRequest, EvaluationStatus, EvaluatorType
+from eval_harness.executors.base import ExecutionResult, ExecutionStatus
 
 
 class AIME26BenchmarkTests(unittest.TestCase):
@@ -56,7 +56,7 @@ class AIME26BenchmarkTests(unittest.TestCase):
     def ready_evaluator(self) -> AIME26Evaluator:
         evaluator = AIME26Evaluator()
         with patch(
-            "gdpval_harness.evaluators.aime26._math_verify_preflight",
+            "eval_harness.evaluators.aime26._math_verify_preflight",
             return_value=(True, "native verifier ready", "0.8.0"),
         ):
             self.assertTrue(evaluator.preflight(Path("/tmp/eval-run")).ok)
@@ -86,7 +86,7 @@ class AIME26BenchmarkTests(unittest.TestCase):
     def test_preflight_requires_pinned_native_dependency_and_helper(self) -> None:
         evaluator = AIME26Evaluator()
         with patch(
-            "gdpval_harness.evaluators.aime26._math_verify_preflight",
+            "eval_harness.evaluators.aime26._math_verify_preflight",
             return_value=(False, "./eval requires math-verify==0.8.0; found math-verify==0.7.0", "0.7.0"),
         ):
             result = evaluator.preflight(Path("/tmp/eval-run"))
@@ -100,7 +100,7 @@ class AIME26BenchmarkTests(unittest.TestCase):
             evaluator = self.ready_evaluator()
 
             with patch(
-                "gdpval_harness.evaluators.aime26._native_math_evaluate",
+                "eval_harness.evaluators.aime26._native_math_evaluate",
                 return_value=(1.0, "42"),
             ) as verifier:
                 evaluation = evaluator.evaluate(self.request(root, result))
@@ -125,7 +125,7 @@ class AIME26BenchmarkTests(unittest.TestCase):
             result = self.execution_result(root, output_text="\\boxed{42}", status=ExecutionStatus.FAILED)
             evaluator = self.ready_evaluator()
 
-            with patch("gdpval_harness.evaluators.aime26._native_math_evaluate") as verifier:
+            with patch("eval_harness.evaluators.aime26._native_math_evaluate") as verifier:
                 evaluation = evaluator.evaluate(self.request(root, result))
 
             verifier.assert_not_called()

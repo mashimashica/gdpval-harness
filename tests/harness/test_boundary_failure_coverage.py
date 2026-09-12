@@ -13,13 +13,13 @@ from pathlib import Path
 from typing import Mapping, cast
 from unittest.mock import patch
 
-from gdpval_harness.benchmarks.aime26 import AIME26Benchmark
-from gdpval_harness.benchmarks.base import Benchmark, BenchmarkTask
-from gdpval_harness.benchmarks.bigcodebench import BigCodeBenchBenchmark
-from gdpval_harness.benchmarks.gdpval import GDPvalBenchmark
-from gdpval_harness.benchmarks.registry import create_benchmark, get_benchmark_descriptor, list_benchmarks
-from gdpval_harness.evaluators.aime26 import AIME26Evaluator, _math_verify_preflight, _native_math_evaluate
-from gdpval_harness.evaluators.base import (
+from eval_harness.benchmarks.aime26 import AIME26Benchmark
+from eval_harness.benchmarks.base import Benchmark, BenchmarkTask
+from eval_harness.benchmarks.bigcodebench import BigCodeBenchBenchmark
+from eval_harness.benchmarks.gdpval import GDPvalBenchmark
+from eval_harness.benchmarks.registry import create_benchmark, get_benchmark_descriptor, list_benchmarks
+from eval_harness.evaluators.aime26 import AIME26Evaluator, _math_verify_preflight, _native_math_evaluate
+from eval_harness.evaluators.base import (
     EvaluationCandidate,
     EvaluationPlan,
     EvaluationRequest,
@@ -28,13 +28,13 @@ from gdpval_harness.evaluators.base import (
     require_one_candidate,
     require_two_candidates,
 )
-from gdpval_harness.evaluators.bigcodebench import BigCodeBenchEvaluator, _native_bigcodebench_evaluate
-from gdpval_harness.evaluators.exact import ExactMatchEvaluator
-from gdpval_harness.evaluators.gdpval import GDPvalExternalEvaluator
-from gdpval_harness.evaluators.pairwise import PairwiseJudgeEvaluator, sanitize_environment
-from gdpval_harness.executors.base import ExecutionResult, ExecutionStatus, TaskSpec
-from gdpval_harness.interventions.agent_skill import AgentSkillIntervention, load_agent_skill_bundle
-from gdpval_harness.interventions.base import (
+from eval_harness.evaluators.bigcodebench import BigCodeBenchEvaluator, _native_bigcodebench_evaluate
+from eval_harness.evaluators.exact import ExactMatchEvaluator
+from eval_harness.evaluators.gdpval import GDPvalExternalEvaluator
+from eval_harness.evaluators.pairwise import PairwiseJudgeEvaluator, sanitize_environment
+from eval_harness.executors.base import ExecutionResult, ExecutionStatus, TaskSpec
+from eval_harness.interventions.agent_skill import AgentSkillIntervention, load_agent_skill_bundle
+from eval_harness.interventions.base import (
     ApplicationMapping,
     InterventionApplication,
     InterventionBundle,
@@ -47,16 +47,16 @@ from gdpval_harness.interventions.base import (
     file_evidence,
     revision_fields,
 )
-from gdpval_harness.interventions.files import FilesIntervention
-from gdpval_harness.interventions.none import NoneIntervention
-from gdpval_harness.interventions.prompt_overlay import (
+from eval_harness.interventions.files import FilesIntervention
+from eval_harness.interventions.none import NoneIntervention
+from eval_harness.interventions.prompt_overlay import (
     MAX_PROMPT_OVERLAY_BYTES,
     PromptOverlayIntervention,
     apply_prompt_overlay,
 )
-from gdpval_harness.interventions.registry import create_intervention, get_intervention
-from gdpval_harness.judges.base import JudgeExecutor, JudgePreflightResult, JudgeRequest, JudgeResult, Verdict
-from gdpval_harness.judges.pairwise import (
+from eval_harness.interventions.registry import create_intervention, get_intervention
+from eval_harness.judges.base import JudgeExecutor, JudgePreflightResult, JudgeRequest, JudgeResult, Verdict
+from eval_harness.judges.pairwise import (
     aggregate,
     build_judge_prompt,
     discover_tasks,
@@ -504,12 +504,12 @@ class EvaluatorBoundaryTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "expected_answer"):
                 aime.validate_plan(EvaluationPlan("task", "prompt", {}, 1))
             with patch(
-                "gdpval_harness.evaluators.aime26._math_verify_preflight",
+                "eval_harness.evaluators.aime26._math_verify_preflight",
                 return_value=(False, "missing", None),
             ):
                 self.assertFalse(aime.preflight().ok)
             with patch(
-                "gdpval_harness.evaluators.aime26._math_verify_preflight",
+                "eval_harness.evaluators.aime26._math_verify_preflight",
                 return_value=(True, "ready", "0.8.0"),
             ):
                 aime.preflight()
@@ -566,7 +566,7 @@ class EvaluatorBoundaryTests(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "preflight"):
                 aime.evaluate(request)
             with patch(
-                "gdpval_harness.evaluators.aime26._math_verify_preflight",
+                "eval_harness.evaluators.aime26._math_verify_preflight",
                 return_value=(True, "native ready", "0.8.0"),
             ):
                 preflight = aime.preflight(root / "run")
@@ -574,7 +574,7 @@ class EvaluatorBoundaryTests(unittest.TestCase):
             self.assertEqual(preflight.version, "0.8.0")
             self.assertEqual(preflight.revision, None)
             with patch(
-                "gdpval_harness.evaluators.aime26._native_math_evaluate",
+                "eval_harness.evaluators.aime26._native_math_evaluate",
                 return_value=(1.0, "42"),
             ) as native:
                 result = aime.evaluate(request)
@@ -591,7 +591,7 @@ class EvaluatorBoundaryTests(unittest.TestCase):
                 {"expected_answer": "42"},
                 (_candidate(root, status=ExecutionStatus.TIMED_OUT, output_text="\\boxed{42}"),),
             )
-            with patch("gdpval_harness.evaluators.aime26._native_math_evaluate") as native:
+            with patch("eval_harness.evaluators.aime26._native_math_evaluate") as native:
                 failed_result = aime.evaluate(failed_request)
             self.assertEqual(failed_result.metrics, {"accuracy": 0.0})
             native.assert_not_called()
@@ -624,7 +624,7 @@ class EvaluatorBoundaryTests(unittest.TestCase):
 
             helper = FakeHelper()
             with patch(
-                "gdpval_harness.evaluators.aime26.importlib.import_module",
+                "eval_harness.evaluators.aime26.importlib.import_module",
                 return_value=helper,
             ):
                 self.assertEqual(_native_math_evaluate("42", "no boxed answer"), (0.0, None))
@@ -632,7 +632,7 @@ class EvaluatorBoundaryTests(unittest.TestCase):
                 self.assertEqual(_native_math_evaluate("42", "\\boxed{42}"), (1.0, "42"))
                 self.assertEqual(helper.run_args[1:], ("42", "\\boxed{42}"))
 
-            module = "gdpval_harness.evaluators.aime26"
+            module = "eval_harness.evaluators.aime26"
             with patch(f"{module}.importlib.metadata.version", side_effect=importlib.metadata.PackageNotFoundError()):
                 missing = _math_verify_preflight()
             self.assertFalse(missing[0])
@@ -705,7 +705,7 @@ class EvaluatorBoundaryTests(unittest.TestCase):
             )
             self.assertEqual(empty.details["status"], "empty_output")
             with patch(
-                "gdpval_harness.evaluators.bigcodebench._native_bigcodebench_evaluate",
+                "eval_harness.evaluators.bigcodebench._native_bigcodebench_evaluate",
                 return_value={"reward": 1.0, "status": "pass", "extracted_model_code": "return 1", "details": None},
             ) as native:
                 passed = evaluator.evaluate(failed_request)
@@ -762,7 +762,7 @@ class EvaluatorBoundaryTests(unittest.TestCase):
                 return_value="return 1",
             ):
                 with patch(
-                    "gdpval_harness.evaluators.bigcodebench.subprocess.run",
+                    "eval_harness.evaluators.bigcodebench.subprocess.run",
                     side_effect=subprocess.TimeoutExpired(cmd=["fake"], timeout=1),
                 ):
                     timeout = _native_bigcodebench_evaluate(
@@ -770,7 +770,7 @@ class EvaluatorBoundaryTests(unittest.TestCase):
                     )
                 self.assertEqual(timeout["status"], "timeout")
                 with patch(
-                    "gdpval_harness.evaluators.bigcodebench.subprocess.run",
+                    "eval_harness.evaluators.bigcodebench.subprocess.run",
                     side_effect=OSError("grader missing"),
                 ):
                     failed = _native_bigcodebench_evaluate(
@@ -778,7 +778,7 @@ class EvaluatorBoundaryTests(unittest.TestCase):
                     )
                 self.assertEqual(failed["status"], "error")
                 with patch(
-                    "gdpval_harness.evaluators.bigcodebench.subprocess.run",
+                    "eval_harness.evaluators.bigcodebench.subprocess.run",
                     return_value=subprocess.CompletedProcess([], 0, stdout="not json", stderr="stderr"),
                 ):
                     malformed = _native_bigcodebench_evaluate(
@@ -797,7 +797,7 @@ class EvaluatorBoundaryTests(unittest.TestCase):
                 return_value="return 1",
             ):
                 with patch(
-                    "gdpval_harness.evaluators.bigcodebench.subprocess.run",
+                    "eval_harness.evaluators.bigcodebench.subprocess.run",
                     side_effect=[
                         subprocess.CompletedProcess(
                             [], 0, stdout=json.dumps({"status": "pass", "details": {"ok": True}}), stderr=""
@@ -926,7 +926,7 @@ class EvaluatorBoundaryTests(unittest.TestCase):
 
             destination = root / "atomic-out"
             with patch(
-                "gdpval_harness.evaluators.gdpval.os.replace",
+                "eval_harness.evaluators.gdpval.os.replace",
                 side_effect=OSError("publish interrupted"),
             ):
                 with self.assertRaisesRegex(OSError, "publish interrupted"):
@@ -935,7 +935,7 @@ class EvaluatorBoundaryTests(unittest.TestCase):
             self.assertEqual(list(root.glob(".atomic-out.staging-*")), [])
 
     def test_gdpval_copy_helpers_keep_bytes_and_reject_nonempty_or_special_boundaries(self) -> None:
-        from gdpval_harness.evaluators import gdpval as gdpval_module
+        from eval_harness.evaluators import gdpval as gdpval_module
 
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -1290,7 +1290,7 @@ class EvaluatorBoundaryTests(unittest.TestCase):
             metadata = next((root / "output").rglob("metadata.json"))
             self.assertEqual(json.loads(metadata.read_text())["error_type"], "KeyboardInterrupt")
 
-            from gdpval_harness.evaluators import pairwise as pairwise_module
+            from eval_harness.evaluators import pairwise as pairwise_module
 
             trial_dir = root / "trial-metadata"
             trial_dir.mkdir()

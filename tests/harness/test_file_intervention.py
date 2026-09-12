@@ -10,9 +10,9 @@ import unittest
 from pathlib import Path
 from typing import Callable
 
-from gdpval_harness.executors.base import TaskSpec
-from gdpval_harness.interventions import FilesIntervention
-from gdpval_harness.interventions.base import InterventionPreflightResult
+from eval_harness.executors.base import TaskSpec
+from eval_harness.interventions import FilesIntervention
+from eval_harness.interventions.base import InterventionPreflightResult
 
 
 class FileInterventionTests(unittest.TestCase):

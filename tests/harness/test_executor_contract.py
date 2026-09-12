@@ -7,9 +7,9 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from gdpval_harness.executors.base import ExecutionStatus, TaskSpec
-from gdpval_harness.executors.registry import get_executor_descriptor, list_executors
-from gdpval_harness.layout import safe_task_id, task_layout
+from eval_harness.executors.base import ExecutionStatus, TaskSpec
+from eval_harness.executors.registry import get_executor_descriptor, list_executors
+from eval_harness.layout import safe_task_id, task_layout
 
 
 class ExecutorContractTests(unittest.TestCase):

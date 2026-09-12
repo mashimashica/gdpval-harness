@@ -11,15 +11,15 @@ from pathlib import Path
 from typing import BinaryIO, NoReturn, cast
 from unittest.mock import patch
 
-from gdpval_harness.executors.base import ExecutionRequest, ExecutionStatus, TaskSpec
-from gdpval_harness.executors.claude_code import ClaudeCodeExecutor
-from gdpval_harness.executors.codex import CodexExecutor
-from gdpval_harness.executors.cursor import CursorExecutor
-from gdpval_harness.executors.registry import create_executor, get_executor_descriptor, list_executors, main
-from gdpval_harness.judges.base import JudgeRequest
-from gdpval_harness.judges.claude_code import ClaudeCodeJudgeExecutor
-from gdpval_harness.judges.codex import CodexJudgeExecutor
-from gdpval_harness.judges.pairwise import parse_verdict
+from eval_harness.executors.base import ExecutionRequest, ExecutionStatus, TaskSpec
+from eval_harness.executors.claude_code import ClaudeCodeExecutor
+from eval_harness.executors.codex import CodexExecutor
+from eval_harness.executors.cursor import CursorExecutor
+from eval_harness.executors.registry import create_executor, get_executor_descriptor, list_executors, main
+from eval_harness.judges.base import JudgeRequest
+from eval_harness.judges.claude_code import ClaudeCodeJudgeExecutor
+from eval_harness.judges.codex import CodexJudgeExecutor
+from eval_harness.judges.pairwise import parse_verdict
 
 
 def _write_command(root: Path, name: str, body: str) -> Path:
@@ -91,9 +91,9 @@ class ExecutorAdapterFailureTests(unittest.TestCase):
 
     def test_executor_version_probes_use_replacement_decoding_and_fail_closed(self) -> None:
         for module, executor in (
-            ("gdpval_harness.executors.codex", CodexExecutor(command="codex")),
-            ("gdpval_harness.executors.claude_code", ClaudeCodeExecutor(command="claude")),
-            ("gdpval_harness.executors.cursor", CursorExecutor(command="agent")),
+            ("eval_harness.executors.codex", CodexExecutor(command="codex")),
+            ("eval_harness.executors.claude_code", ClaudeCodeExecutor(command="claude")),
+            ("eval_harness.executors.cursor", CursorExecutor(command="agent")),
         ):
             with patch(
                 f"{module}.subprocess.run",
@@ -132,7 +132,7 @@ class ExecutorAdapterFailureTests(unittest.TestCase):
                 return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
 
             executor._version = "fake"
-            with patch("gdpval_harness.executors.codex.subprocess.run", side_effect=fake_run):
+            with patch("eval_harness.executors.codex.subprocess.run", side_effect=fake_run):
                 result = executor.execute(request)
             self.assertEqual(result.status, ExecutionStatus.NO_DELIVERABLE)
             self.assertEqual(captured["errors"], "replace")
@@ -149,7 +149,7 @@ class ExecutorAdapterFailureTests(unittest.TestCase):
             command = _write_command(root, "claude", "exit 0\n")
             executor = ClaudeCodeExecutor(command=str(command))
             with patch(
-                "gdpval_harness.executors.claude_code.subprocess.run",
+                "eval_harness.executors.claude_code.subprocess.run",
                 side_effect=[
                     subprocess.CompletedProcess([], 0, stdout="claude fake", stderr=""),
                     subprocess.TimeoutExpired(["claude", "auth", "status"], 15),
@@ -160,7 +160,7 @@ class ExecutorAdapterFailureTests(unittest.TestCase):
             self.assertIn("could not inspect", timed_out.details[0])
 
             with patch(
-                "gdpval_harness.executors.claude_code.subprocess.run",
+                "eval_harness.executors.claude_code.subprocess.run",
                 side_effect=[
                     subprocess.CompletedProcess([], 0, stdout="claude fake", stderr=""),
                     subprocess.CompletedProcess([], 1, stdout="", stderr=""),
@@ -195,7 +195,7 @@ class ExecutorAdapterFailureTests(unittest.TestCase):
             request = _execution_request(root)
 
             with patch(
-                "gdpval_harness.executors.cursor.subprocess.run",
+                "eval_harness.executors.cursor.subprocess.run",
                 return_value=subprocess.CompletedProcess([], 0, stdout="out", stderr="err"),
             ) as run:
                 no_deliverable = executor.execute(request)
@@ -205,7 +205,7 @@ class ExecutorAdapterFailureTests(unittest.TestCase):
             references = request.workspace / "reference_files"
             references.mkdir(parents=True)
             (references / "source.txt").write_text("source", encoding="utf-8")
-            with patch("gdpval_harness.executors.cursor.subprocess.run", side_effect=_raise_interrupt):
+            with patch("eval_harness.executors.cursor.subprocess.run", side_effect=_raise_interrupt):
                 with self.assertRaises(KeyboardInterrupt):
                     executor.execute(request)
             self.assertTrue(references.is_dir())
@@ -317,13 +317,13 @@ class ExecutorAdapterFailureTests(unittest.TestCase):
             request = _execution_request(root)
             executor = CodexExecutor(command="codex")
             executor._version = "test"
-            with patch("gdpval_harness.executors.codex.subprocess.run", side_effect=_raise_timeout):
+            with patch("eval_harness.executors.codex.subprocess.run", side_effect=_raise_timeout):
                 timed_out = executor.execute(request)
             self.assertEqual(timed_out.status, ExecutionStatus.TIMED_OUT)
             self.assertEqual((request.executor_dir / "stdout.log").read_text(), "partial �")
             self.assertEqual((request.executor_dir / "stderr.log").read_text(), "error �")
 
-            with patch("gdpval_harness.executors.codex.subprocess.run", side_effect=_raise_interrupt):
+            with patch("eval_harness.executors.codex.subprocess.run", side_effect=_raise_interrupt):
                 with self.assertRaises(KeyboardInterrupt):
                     executor.execute(request)
             self.assertTrue((request.executor_dir / "stdout.log").is_file())
@@ -392,12 +392,12 @@ class ExecutorAdapterFailureTests(unittest.TestCase):
             self.assertEqual(failed.exit_code, 8)
 
             request = _execution_request(root)
-            with patch("gdpval_harness.executors.claude_code.subprocess.run", side_effect=_raise_timeout):
+            with patch("eval_harness.executors.claude_code.subprocess.run", side_effect=_raise_timeout):
                 timed_out = executor.execute(request)
             self.assertEqual(timed_out.status, ExecutionStatus.TIMED_OUT)
             self.assertEqual((request.executor_dir / "stdout.log").read_text(), "partial �")
 
-            with patch("gdpval_harness.executors.claude_code.subprocess.run", side_effect=_raise_interrupt):
+            with patch("eval_harness.executors.claude_code.subprocess.run", side_effect=_raise_interrupt):
                 with self.assertRaises(KeyboardInterrupt):
                     executor.execute(request)
             failed_executor = ClaudeCodeExecutor(command=str(root / "missing"))
@@ -477,7 +477,7 @@ class ExecutorAdapterFailureTests(unittest.TestCase):
             self.assertEqual(executor._restore_reference_files(no_reference, None), None)
 
             timeout_request = _execution_request(root)
-            with patch("gdpval_harness.executors.cursor.subprocess.run", side_effect=_raise_timeout):
+            with patch("eval_harness.executors.cursor.subprocess.run", side_effect=_raise_timeout):
                 timed_out = executor.execute(timeout_request)
             self.assertEqual(timed_out.status, ExecutionStatus.TIMED_OUT)
             failed_executor = CursorExecutor(command=str(root / "missing"))
@@ -487,7 +487,7 @@ class ExecutorAdapterFailureTests(unittest.TestCase):
 
 class JudgeAdapterFailureTests(unittest.TestCase):
     def test_codex_judge_policy_helpers_cover_runtime_boundaries_without_model_calls(self) -> None:
-        from gdpval_harness.judges import codex as codex_module
+        from eval_harness.judges import codex as codex_module
 
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -513,14 +513,14 @@ class JudgeAdapterFailureTests(unittest.TestCase):
             self.assertFalse(ok)
             self.assertIn("Windows", detail)
             with patch(
-                "gdpval_harness.judges.codex.subprocess.run",
+                "eval_harness.judges.codex.subprocess.run",
                 side_effect=OSError("probe unavailable"),
             ):
                 ok, detail = judge._probe_read_confinement(environment)
             self.assertFalse(ok)
             self.assertIn("could not verify", detail)
             with patch(
-                "gdpval_harness.judges.codex.subprocess.run",
+                "eval_harness.judges.codex.subprocess.run",
                 return_value=subprocess.CompletedProcess([], 3, stdout="", stderr="denied"),
             ):
                 ok, detail = judge._probe_read_confinement(environment)
@@ -578,17 +578,17 @@ class JudgeAdapterFailureTests(unittest.TestCase):
             root = Path(tmp)
             judge = CodexJudgeExecutor(command="codex")
             request = _judge_request(root)
-            with patch("gdpval_harness.judges.codex.subprocess.run", side_effect=KeyboardInterrupt):
+            with patch("eval_harness.judges.codex.subprocess.run", side_effect=KeyboardInterrupt):
                 with self.assertRaises(KeyboardInterrupt):
                     judge.judge(request)
             self.assertTrue(request.executor_dir.joinpath("stdout.log").is_file())
             with patch(
-                "gdpval_harness.judges.codex.subprocess.run",
+                "eval_harness.judges.codex.subprocess.run",
                 return_value=subprocess.CompletedProcess([], 0, stdout="", stderr="version"),
             ) as run:
                 self.assertEqual(judge._version_with_environment({"PATH": "/bin"}), "version")
             self.assertEqual(run.call_args.kwargs["errors"], "replace")
-            with patch("gdpval_harness.judges.codex.subprocess.run", side_effect=subprocess.TimeoutExpired([], 1)):
+            with patch("eval_harness.judges.codex.subprocess.run", side_effect=subprocess.TimeoutExpired([], 1)):
                 self.assertIsNone(judge._version_with_environment({"PATH": "/bin"}))
 
     def test_codex_judge_normalizes_invalid_utf8_logs_and_keeps_nonzero_failure(self) -> None:
@@ -607,7 +607,7 @@ class JudgeAdapterFailureTests(unittest.TestCase):
                 stderr.flush()
                 return subprocess.CompletedProcess(command, 9)
 
-            with patch("gdpval_harness.judges.codex.subprocess.run", side_effect=fake_run):
+            with patch("eval_harness.judges.codex.subprocess.run", side_effect=fake_run):
                 result = judge.judge(request)
             self.assertIsNone(result.verdict)
             self.assertEqual(result.exit_code, 9)
@@ -621,7 +621,7 @@ class JudgeAdapterFailureTests(unittest.TestCase):
             command = _write_command(root, "codex", "exit 0\n")
             judge = CodexJudgeExecutor(command=str(command))
             with patch(
-                "gdpval_harness.judges.codex.subprocess.run",
+                "eval_harness.judges.codex.subprocess.run",
                 side_effect=[
                     subprocess.CompletedProcess([], 0, stdout="fake", stderr=""),
                     subprocess.TimeoutExpired(["codex", "login", "status"], 15),
@@ -632,7 +632,7 @@ class JudgeAdapterFailureTests(unittest.TestCase):
             self.assertIn("could not inspect", timed_out.details[0])
 
             with patch(
-                "gdpval_harness.judges.codex.subprocess.run",
+                "eval_harness.judges.codex.subprocess.run",
                 side_effect=[
                     subprocess.CompletedProcess([], 0, stdout="fake", stderr=""),
                     subprocess.CompletedProcess([], 1, stdout="", stderr=""),
@@ -711,12 +711,12 @@ class JudgeAdapterFailureTests(unittest.TestCase):
             self.assertIsNone(failed.verdict)
 
             timeout_request = _judge_request(root)
-            with patch("gdpval_harness.judges.codex.subprocess.run", side_effect=_raise_timeout):
+            with patch("eval_harness.judges.codex.subprocess.run", side_effect=_raise_timeout):
                 timed_out = judge.judge(timeout_request)
             self.assertIsNone(timed_out.verdict)
             self.assertEqual(timed_out.metadata["parse_error"], "judge timed out")
 
-            with patch("gdpval_harness.judges.codex.subprocess.run", side_effect=_raise_os_error):
+            with patch("eval_harness.judges.codex.subprocess.run", side_effect=_raise_os_error):
                 os_error = judge.judge(_judge_request(root))
             self.assertIn("fake command unavailable", str(os_error.metadata["parse_error"]))
             self.assertIn("fake command unavailable", os_error.stderr_path.read_text())
@@ -754,10 +754,10 @@ class JudgeAdapterFailureTests(unittest.TestCase):
             self.assertIsNone(invalid_result.verdict)
             self.assertIn("standalone BOXED", str(invalid_result.metadata["parse_error"]))
             timeout_request = _judge_request(root)
-            with patch("gdpval_harness.judges.claude_code.subprocess.run", side_effect=_raise_timeout):
+            with patch("eval_harness.judges.claude_code.subprocess.run", side_effect=_raise_timeout):
                 timeout = judge.judge(timeout_request)
             self.assertEqual(timeout.metadata["parse_error"], "judge timed out")
-            with patch("gdpval_harness.judges.claude_code.subprocess.run", side_effect=_raise_os_error):
+            with patch("eval_harness.judges.claude_code.subprocess.run", side_effect=_raise_os_error):
                 os_error = judge.judge(_judge_request(root))
             self.assertIn("fake command unavailable", str(os_error.metadata["parse_error"]))
 
@@ -767,7 +767,7 @@ class JudgeAdapterFailureTests(unittest.TestCase):
             judge = ClaudeCodeJudgeExecutor(command="claude")
             judge._version = "fake"
             request = _judge_request(root)
-            with patch("gdpval_harness.judges.claude_code.subprocess.run", side_effect=_raise_timeout) as run:
+            with patch("eval_harness.judges.claude_code.subprocess.run", side_effect=_raise_timeout) as run:
                 result = judge.judge(request)
             self.assertEqual(run.call_args.kwargs["errors"], "replace")
             self.assertIsNone(result.verdict)
@@ -787,7 +787,7 @@ class JudgeAdapterFailureTests(unittest.TestCase):
             self.assertFalse(windows.ok)
             self.assertIn("Windows", windows.details[0])
             with patch(
-                "gdpval_harness.judges.claude_code.subprocess.run",
+                "eval_harness.judges.claude_code.subprocess.run",
                 side_effect=[
                     subprocess.CompletedProcess([], 0, stdout="version", stderr=""),
                     subprocess.TimeoutExpired(["claude", "auth", "status"], 15),
@@ -797,7 +797,7 @@ class JudgeAdapterFailureTests(unittest.TestCase):
             self.assertFalse(timed_out.ok)
             self.assertIn("could not inspect", timed_out.details[0])
             with patch(
-                "gdpval_harness.judges.claude_code.subprocess.run",
+                "eval_harness.judges.claude_code.subprocess.run",
                 side_effect=[
                     subprocess.CompletedProcess([], 0, stdout="version", stderr=""),
                     subprocess.CompletedProcess([], 1, stdout="", stderr=""),
@@ -822,7 +822,7 @@ class JudgeAdapterFailureTests(unittest.TestCase):
             )
             self.assertNotIn("--model", judge.build_command(request))
             judge._version = "fake"
-            with patch("gdpval_harness.judges.claude_code.subprocess.run", side_effect=_raise_interrupt):
+            with patch("eval_harness.judges.claude_code.subprocess.run", side_effect=_raise_interrupt):
                 with self.assertRaises(KeyboardInterrupt):
                     judge.judge(request)
             self.assertTrue(request.executor_dir.joinpath("stdout.log").is_file())

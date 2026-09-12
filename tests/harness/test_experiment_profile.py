@@ -16,11 +16,11 @@ from types import MappingProxyType
 from typing import cast
 from unittest.mock import Mock, patch
 
-import gdpval_harness.experiments.profile as profile_module
-from gdpval_harness.builders.base import BuilderInputBundle
-from gdpval_harness.builders.inputs import load_builder_input_bundle
-from gdpval_harness.experiments.base import ExperimentArm, ExperimentInputSpec, ExperimentProfile
-from gdpval_harness.experiments.profile import load_experiment_inputs, load_experiment_profile
+import eval_harness.experiments.profile as profile_module
+from eval_harness.builders.base import BuilderInputBundle
+from eval_harness.builders.inputs import load_builder_input_bundle
+from eval_harness.experiments.base import ExperimentArm, ExperimentInputSpec, ExperimentProfile
+from eval_harness.experiments.profile import load_experiment_inputs, load_experiment_profile
 
 
 _HEAD = "0123456789abcdef0123456789abcdef01234567"  # pragma: allowlist secret
@@ -205,7 +205,7 @@ class ExperimentProfileLoaderTests(unittest.TestCase):
                 CompletedProcess([], 0, stdout=b"allowed", stderr=b""),
             ]
 
-            with patch("gdpval_harness.experiments.profile.subprocess.run", side_effect=completed) as git_run:
+            with patch("eval_harness.experiments.profile.subprocess.run", side_effect=completed) as git_run:
                 bundles = load_experiment_inputs(profile, {"input-a": source})
 
             self.assertEqual(git_run.call_count, 3)
@@ -251,7 +251,7 @@ class ExperimentProfileLoaderTests(unittest.TestCase):
                         bad_result,
                     ]
                     with (
-                        patch("gdpval_harness.experiments.profile.subprocess.run", side_effect=results) as git_run,
+                        patch("eval_harness.experiments.profile.subprocess.run", side_effect=results) as git_run,
                         self.assertRaises(ValueError),
                     ):
                         load_experiment_inputs(profile, {"input-a": source})
@@ -318,7 +318,7 @@ class ExperimentProfileLoaderTests(unittest.TestCase):
                 CompletedProcess([], 0, stdout=("f" * 40) + "\n", stderr=""),
             ]
             with (
-                patch("gdpval_harness.experiments.profile.subprocess.run", side_effect=results) as git_run,
+                patch("eval_harness.experiments.profile.subprocess.run", side_effect=results) as git_run,
                 patch.object(profile_module, "load_builder_input_bundle", wraps=load_builder_input_bundle) as loader,
                 self.assertRaises(ValueError),
             ):
@@ -340,7 +340,7 @@ class ExperimentProfileLoaderTests(unittest.TestCase):
                 with self.subTest(result=result):
                     loader = Mock(wraps=load_builder_input_bundle)
                     with (
-                        patch("gdpval_harness.experiments.profile.subprocess.run", return_value=result) as git_run,
+                        patch("eval_harness.experiments.profile.subprocess.run", return_value=result) as git_run,
                         patch.object(profile_module, "load_builder_input_bundle", loader),
                         self.assertRaises(ValueError),
                     ):
@@ -350,7 +350,7 @@ class ExperimentProfileLoaderTests(unittest.TestCase):
 
             malformed_bytes = CompletedProcess([], 0, stdout=b"\xff\n", stderr=b"\xfe")
             with (
-                patch("gdpval_harness.experiments.profile.subprocess.run", return_value=malformed_bytes),
+                patch("eval_harness.experiments.profile.subprocess.run", return_value=malformed_bytes),
                 self.assertRaises(ValueError),
             ):
                 load_experiment_inputs(profile, {"input-a": source})

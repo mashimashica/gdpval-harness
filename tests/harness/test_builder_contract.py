@@ -10,7 +10,7 @@ from dataclasses import FrozenInstanceError
 from pathlib import Path
 from typing import Protocol, Sequence, cast
 
-from gdpval_harness.builders import (
+from eval_harness.builders import (
     Builder,
     BuilderInputBundle,
     BuilderInputManifest,
@@ -21,8 +21,8 @@ from gdpval_harness.builders import (
     BuildStatus,
     canonical_builder_input_manifest_bytes,
 )
-from gdpval_harness.executors.base import ExecutionResult, ExecutionStatus, TaskSpec
-from gdpval_harness.interventions.base import (
+from eval_harness.executors.base import ExecutionResult, ExecutionStatus, TaskSpec
+from eval_harness.interventions.base import (
     ApplicationMapping,
     InterventionBundle,
     InterventionFile,
@@ -513,7 +513,7 @@ class BuilderContractTests(unittest.TestCase):
         self.assertEqual(Builder.__abstractmethods__, frozenset({"preflight", "build"}))
         self.assertEqual(Builder.__annotations__["name"], "str")
         self.assertEqual(
-            set(__import__("gdpval_harness.builders", fromlist=["__all__"]).__all__),
+            set(__import__("eval_harness.builders", fromlist=["__all__"]).__all__),
             {
                 "ArtifactHandoffError",
                 "BuildFailurePhase",

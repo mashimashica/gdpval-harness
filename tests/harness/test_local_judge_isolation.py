@@ -9,9 +9,9 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from gdpval_harness.judges.claude_code import ClaudeCodeJudgeExecutor
-from gdpval_harness.judges.codex import CodexJudgeExecutor
-from gdpval_harness.local_judge_runner import _judge_environment, _paths_overlap, _safe_temp_parent
+from eval_harness.judges.claude_code import ClaudeCodeJudgeExecutor
+from eval_harness.judges.codex import CodexJudgeExecutor
+from eval_harness.local_judge_runner import _judge_environment, _paths_overlap, _safe_temp_parent
 
 
 class LocalJudgeIsolationTests(unittest.TestCase):

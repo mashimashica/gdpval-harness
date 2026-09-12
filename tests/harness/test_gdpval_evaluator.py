@@ -8,9 +8,9 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from gdpval_harness.evaluators.base import EvaluationCandidate, EvaluationPlan, EvaluationRequest, EvaluationStatus
-from gdpval_harness.evaluators.gdpval import GDPvalExternalEvaluator
-from gdpval_harness.executors.base import ExecutionResult, ExecutionStatus
+from eval_harness.evaluators.base import EvaluationCandidate, EvaluationPlan, EvaluationRequest, EvaluationStatus
+from eval_harness.evaluators.gdpval import GDPvalExternalEvaluator
+from eval_harness.executors.base import ExecutionResult, ExecutionStatus
 
 
 def _execution(root: Path, *, status: ExecutionStatus = ExecutionStatus.COMPLETED) -> ExecutionResult:

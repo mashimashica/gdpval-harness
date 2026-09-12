@@ -12,8 +12,8 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock, call, patch
 
-import gdpval_harness.cli as cli
-from gdpval_harness.experiments.base import ExperimentRunConfig
+import eval_harness.cli as cli
+from eval_harness.experiments.base import ExperimentRunConfig
 
 
 class ExperimentCLIHelpers:

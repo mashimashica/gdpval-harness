@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import unittest
 
-from scripts.ci.run_gdpval_harness_coverage import coverage_summary_passes
+from scripts.ci.run_eval_harness_coverage import coverage_summary_passes
 
 
 class CoverageGuardTests(unittest.TestCase):

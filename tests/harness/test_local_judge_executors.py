@@ -11,9 +11,9 @@ from pathlib import Path
 from typing import Protocol, cast
 from unittest.mock import patch
 
-from gdpval_harness.judges.base import JudgeRequest
-from gdpval_harness.judges.claude_code import ClaudeCodeJudgeExecutor
-from gdpval_harness.judges.codex import CodexJudgeExecutor
+from eval_harness.judges.base import JudgeRequest
+from eval_harness.judges.claude_code import ClaudeCodeJudgeExecutor
+from eval_harness.judges.codex import CodexJudgeExecutor
 
 
 class _BinaryStream(Protocol):
@@ -165,7 +165,7 @@ class LocalJudgeExecutorTests(unittest.TestCase):
                 raise KeyboardInterrupt
 
             with (
-                patch("gdpval_harness.judges.codex.subprocess.run", side_effect=interrupt_after_output),
+                patch("eval_harness.judges.codex.subprocess.run", side_effect=interrupt_after_output),
                 self.assertRaises(KeyboardInterrupt),
             ):
                 judge.judge(request)

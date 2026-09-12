@@ -9,10 +9,10 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import TypedDict, cast
 
-from gdpval_harness.evaluators.base import EvaluationCandidate, EvaluationRequest, EvaluationStatus
-from gdpval_harness.evaluators.pairwise import PairwiseJudgeEvaluator
-from gdpval_harness.executors.base import ExecutionResult, ExecutionStatus
-from gdpval_harness.judges.base import JudgeExecutor, JudgePreflightResult, JudgeRequest, JudgeResult, Verdict
+from eval_harness.evaluators.base import EvaluationCandidate, EvaluationRequest, EvaluationStatus
+from eval_harness.evaluators.pairwise import PairwiseJudgeEvaluator
+from eval_harness.executors.base import ExecutionResult, ExecutionStatus
+from eval_harness.judges.base import JudgeExecutor, JudgePreflightResult, JudgeRequest, JudgeResult, Verdict
 
 
 class _CandidateOutcome(TypedDict):

@@ -1,6 +1,6 @@
 # Upstream relationship
 
-`gdpval-harness` is a focused fork of [`NVIDIA-NeMo/Gym`](https://github.com/NVIDIA-NeMo/Gym), licensed under Apache-2.0.
+`eval-harness` is a focused fork of [`NVIDIA-NeMo/Gym`](https://github.com/NVIDIA-NeMo/Gym), licensed under Apache-2.0.
 
 The fork currently retains the upstream engine instead of copying GDPval code into a new standalone implementation. The GDPval path depends on several NeMo Gym components together:
 

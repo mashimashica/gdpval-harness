@@ -10,11 +10,11 @@ from pathlib import Path
 from typing import cast
 from unittest.mock import patch
 
-from gdpval_harness.builders import BuildFailurePhase, BuildRequest, BuildStatus
-from gdpval_harness.builders.artifact import ArtifactHandoffError
-from gdpval_harness.builders.executor_skill import ExecutorSkillBuilder
-from gdpval_harness.builders.inputs import load_builder_input_bundle
-from gdpval_harness.executors.base import (
+from eval_harness.builders import BuildFailurePhase, BuildRequest, BuildStatus
+from eval_harness.builders.artifact import ArtifactHandoffError
+from eval_harness.builders.executor_skill import ExecutorSkillBuilder
+from eval_harness.builders.inputs import load_builder_input_bundle
+from eval_harness.executors.base import (
     ExecutionRequest,
     ExecutionResult,
     ExecutionStatus,
@@ -22,7 +22,7 @@ from gdpval_harness.executors.base import (
     PreflightResult,
     TaskSpec,
 )
-from gdpval_harness.interventions import AgentSkillIntervention
+from eval_harness.interventions import AgentSkillIntervention
 
 
 class DeterministicExecutor(Executor):
@@ -393,7 +393,7 @@ class ExecutorSkillBuilderTests(unittest.TestCase):
             root = Path(temporary)
             executor = DeterministicExecutor()
             with patch(
-                "gdpval_harness.builders.executor_skill.seal_generated_skill",
+                "eval_harness.builders.executor_skill.seal_generated_skill",
                 side_effect=ArtifactHandoffError("handoff failed"),
             ):
                 result = ExecutorSkillBuilder(executor).build(self._request(root))
@@ -412,7 +412,7 @@ class ExecutorSkillBuilderTests(unittest.TestCase):
                 raise FileExistsError("artifact root appeared after execution")
 
             with patch(
-                "gdpval_harness.builders.executor_skill.seal_generated_skill",
+                "eval_harness.builders.executor_skill.seal_generated_skill",
                 side_effect=race,
             ):
                 result = ExecutorSkillBuilder(executor).build(request)

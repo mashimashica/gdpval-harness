@@ -14,13 +14,13 @@ from pathlib import Path
 from typing import Iterator, overload
 from unittest.mock import patch
 
-import gdpval_harness.builders.artifact as artifact_module
-import gdpval_harness.builders.base as base_module
-import gdpval_harness.builders.executor_skill as executor_skill_module
-import gdpval_harness.builders.inputs as inputs_module
-import gdpval_harness.builders.prompt as prompt_module
-from gdpval_harness.builders.artifact import ArtifactHandoffError, GeneratedSkillValidationError
-from gdpval_harness.builders.base import (
+import eval_harness.builders.artifact as artifact_module
+import eval_harness.builders.base as base_module
+import eval_harness.builders.executor_skill as executor_skill_module
+import eval_harness.builders.inputs as inputs_module
+import eval_harness.builders.prompt as prompt_module
+from eval_harness.builders.artifact import ArtifactHandoffError, GeneratedSkillValidationError
+from eval_harness.builders.base import (
     BuilderInputBundle,
     BuilderInputManifest,
     BuilderPreflightResult,
@@ -29,14 +29,14 @@ from gdpval_harness.builders.base import (
     BuildResult,
     BuildStatus,
 )
-from gdpval_harness.builders.executor_skill import ExecutorSkillBuilder
-from gdpval_harness.builders.inputs import (
+from eval_harness.builders.executor_skill import ExecutorSkillBuilder
+from eval_harness.builders.inputs import (
     StagedBuilderInput,
     load_builder_input_bundle,
     stage_builder_inputs,
     verify_staged_builder_inputs,
 )
-from gdpval_harness.executors.base import (
+from eval_harness.executors.base import (
     ExecutionRequest,
     ExecutionResult,
     ExecutionStatus,
@@ -44,8 +44,8 @@ from gdpval_harness.executors.base import (
     PreflightResult,
     TaskSpec,
 )
-from gdpval_harness.interventions import InterventionBundle, load_agent_skill_bundle
-from gdpval_harness.interventions.base import (
+from eval_harness.interventions import InterventionBundle, load_agent_skill_bundle
+from eval_harness.interventions.base import (
     InterventionFile,
     compute_bundle_sha256,
     file_evidence,

@@ -13,12 +13,12 @@ from pathlib import Path
 from typing import Mapping, cast
 from unittest.mock import patch
 
-import gdpval_harness.local_judge_runner as local_judge_runner
-import gdpval_harness.local_runner as local_runner
-import gdpval_harness.provenance as provenance
-import gdpval_harness.runner as generic_runner
-from gdpval_harness.benchmarks.base import Benchmark, BenchmarkTask
-from gdpval_harness.evaluators.base import (
+import eval_harness.local_judge_runner as local_judge_runner
+import eval_harness.local_runner as local_runner
+import eval_harness.provenance as provenance
+import eval_harness.runner as generic_runner
+from eval_harness.benchmarks.base import Benchmark, BenchmarkTask
+from eval_harness.evaluators.base import (
     EvaluationPlan,
     EvaluationRequest,
     EvaluationResult,
@@ -27,7 +27,7 @@ from gdpval_harness.evaluators.base import (
     EvaluatorPreflightResult,
     EvaluatorType,
 )
-from gdpval_harness.executors.base import (
+from eval_harness.executors.base import (
     ExecutionRequest,
     ExecutionResult,
     ExecutionStatus,
@@ -35,7 +35,7 @@ from gdpval_harness.executors.base import (
     PreflightResult,
     TaskSpec,
 )
-from gdpval_harness.interventions.base import (
+from eval_harness.interventions.base import (
     ApplicationMapping,
     Intervention,
     InterventionApplication,
@@ -46,9 +46,9 @@ from gdpval_harness.interventions.base import (
     InterventionType,
     compute_bundle_sha256,
 )
-from gdpval_harness.interventions.none import NoneIntervention
-from gdpval_harness.judges.base import JudgeExecutor, JudgePreflightResult, JudgeRequest, JudgeResult, Verdict
-from gdpval_harness.layout import task_layout
+from eval_harness.interventions.none import NoneIntervention
+from eval_harness.judges.base import JudgeExecutor, JudgePreflightResult, JudgeRequest, JudgeResult, Verdict
+from eval_harness.layout import task_layout
 
 
 def detail_text(payload: Mapping[str, object]) -> list[str]:
@@ -499,7 +499,7 @@ class RunnerReliabilityTests(unittest.TestCase):
             with (
                 patch.object(local_runner, "_executor", return_value=executor),
                 patch(
-                    "gdpval_harness.local_runner.subprocess.run", return_value=subprocess.CompletedProcess([], 0)
+                    "eval_harness.local_runner.subprocess.run", return_value=subprocess.CompletedProcess([], 0)
                 ) as run,
             ):
                 local_runner._write_run_metadata(out, payload)
@@ -513,7 +513,7 @@ class RunnerReliabilityTests(unittest.TestCase):
             patch.dict(os.environ, {"GDPVAL_EXECUTOR": "codex", "OUT": "/tmp/reliability-run"}, clear=True),
         ):
             self.assertEqual(local_runner.run(), 2)
-        with patch("gdpval_harness.local_runner.sys.argv", ["local_runner", "unknown"]):
+        with patch("eval_harness.local_runner.sys.argv", ["local_runner", "unknown"]):
             with self.assertRaisesRegex(SystemExit, "unknown local-runner mode"):
                 local_runner.main()
 
@@ -723,11 +723,11 @@ class LocalJudgeReliabilityTests(unittest.TestCase):
                     dataset.write_text('{"task_id":"one","prompt":"prompt-one"}\n', encoding="utf-8")
                     return subprocess.CompletedProcess([], 0)
 
-                with patch("gdpval_harness.local_judge_runner.subprocess.run", side_effect=prepare_dataset):
+                with patch("eval_harness.local_judge_runner.subprocess.run", side_effect=prepare_dataset):
                     local_judge_runner._ensure_dataset()
                 dataset.unlink()
                 with patch(
-                    "gdpval_harness.local_judge_runner.subprocess.run",
+                    "eval_harness.local_judge_runner.subprocess.run",
                     return_value=subprocess.CompletedProcess([], 2),
                 ):
                     with self.assertRaisesRegex(RuntimeError, "failed to prepare"):
@@ -760,7 +760,7 @@ class LocalJudgeReliabilityTests(unittest.TestCase):
 
             self.assertTrue(local_judge_runner._paths_overlap(root, root / "nested"))
             self.assertFalse(local_judge_runner._paths_overlap(root / "a", root / "b"))
-            with patch("gdpval_harness.local_judge_runner.tempfile.mkdtemp", side_effect=OSError("no temp")):
+            with patch("eval_harness.local_judge_runner.tempfile.mkdtemp", side_effect=OSError("no temp")):
                 with self.assertRaisesRegex(RuntimeError, "no writable system temporary"):
                     local_judge_runner._safe_temp_parent(root / "a", root / "b", root / "out")
 
@@ -826,7 +826,7 @@ class LocalJudgeReliabilityTests(unittest.TestCase):
             self.assertTrue(any("prior run data" in item for item in details))
             self.assertTrue(any("isolated judge temp root" in item for item in details))
 
-            with patch("gdpval_harness.local_judge_runner.Path.write_text", side_effect=OSError("read-only")):
+            with patch("eval_harness.local_judge_runner.Path.write_text", side_effect=OSError("read-only")):
                 with (
                     patch.dict(
                         os.environ,
@@ -944,7 +944,7 @@ class LocalJudgeReliabilityTests(unittest.TestCase):
                 ):
                     self.assertEqual(local_judge_runner.run(), 2)
 
-            with patch("gdpval_harness.local_judge_runner.sys.argv", ["local_judge_runner", "unknown"]):
+            with patch("eval_harness.local_judge_runner.sys.argv", ["local_judge_runner", "unknown"]):
                 with self.assertRaisesRegex(SystemExit, "unknown local-judge mode"):
                     local_judge_runner.main()
 
@@ -975,15 +975,15 @@ class GenericRunnerReliabilityTests(unittest.TestCase):
             path = root / "record.json"
             generic_runner._write_json(path, {"status": "ok"})
             self.assertEqual(json.loads(path.read_text()), {"status": "ok"})
-            with patch("gdpval_harness.runner.os.replace", side_effect=OSError("replace denied")):
+            with patch("eval_harness.runner.os.replace", side_effect=OSError("replace denied")):
                 with self.assertRaisesRegex(OSError, "replace denied"):
                     generic_runner._write_json(root / "replace.json", {"status": "failed"})
             self.assertEqual(list(root.glob(".replace.json.tmp-*")), [])
-            with patch("gdpval_harness.runner.os.fsync", side_effect=OSError("fsync denied")):
+            with patch("eval_harness.runner.os.fsync", side_effect=OSError("fsync denied")):
                 with self.assertRaisesRegex(OSError, "fsync denied"):
                     generic_runner._write_json(root / "fsync.json", {"status": "failed"})
             self.assertEqual(list(root.glob(".fsync.json.tmp-*")), [])
-            with patch("gdpval_harness.runner.os.open", side_effect=OSError("directory unsupported")):
+            with patch("eval_harness.runner.os.open", side_effect=OSError("directory unsupported")):
                 generic_runner._fsync_directory(root)
 
             with patch.dict(
@@ -1172,7 +1172,7 @@ class ProvenanceReliabilityTests(unittest.TestCase):
         sha = "a" * 40
         head = subprocess.CompletedProcess([], 0, stdout=sha.encode() + b"\n", stderr=b"")
         status = subprocess.CompletedProcess([], 0, stdout=b" M file\xff.txt\n", stderr=b"")
-        with patch("gdpval_harness.provenance.subprocess.run", side_effect=[head, status]):
+        with patch("eval_harness.provenance.subprocess.run", side_effect=[head, status]):
             observed = provenance.repository_provenance(Path("/tmp/provenance"))
         self.assertEqual(observed.commit, sha)
         self.assertEqual(observed.worktree_status, "dirty")
@@ -1181,7 +1181,7 @@ class ProvenanceReliabilityTests(unittest.TestCase):
         for value in malformed_statuses:
             with self.subTest(value=value):
                 with patch(
-                    "gdpval_harness.provenance.subprocess.run",
+                    "eval_harness.provenance.subprocess.run",
                     side_effect=[
                         subprocess.CompletedProcess([], 0, stdout=f"{sha}\n", stderr=""),
                         subprocess.CompletedProcess([], 0, stdout=value, stderr=""),
@@ -1190,13 +1190,13 @@ class ProvenanceReliabilityTests(unittest.TestCase):
                     observed = provenance.repository_provenance(Path("/tmp/provenance"))
                 self.assertEqual(observed.worktree_status, "unavailable")
 
-        with patch("gdpval_harness.provenance.subprocess.run", side_effect=RuntimeError("git unavailable")):
+        with patch("eval_harness.provenance.subprocess.run", side_effect=RuntimeError("git unavailable")):
             self.assertEqual(
                 provenance.repository_provenance(Path("/tmp/provenance")).revision_status,
                 "unavailable",
             )
         result_with_bad_attributes: object = object()
-        with patch("gdpval_harness.provenance.subprocess.run", return_value=result_with_bad_attributes):
+        with patch("eval_harness.provenance.subprocess.run", return_value=result_with_bad_attributes):
             self.assertEqual(
                 provenance.repository_provenance(Path("/tmp/provenance")).revision_status,
                 "unavailable",

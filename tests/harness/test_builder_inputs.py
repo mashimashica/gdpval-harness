@@ -12,15 +12,15 @@ from pathlib import Path
 from typing import cast
 from unittest.mock import patch
 
-import gdpval_harness.builders.inputs as inputs_module
-from gdpval_harness.builders.base import BuilderInputBundle, canonical_builder_input_manifest_bytes
-from gdpval_harness.builders.inputs import (
+import eval_harness.builders.inputs as inputs_module
+from eval_harness.builders.base import BuilderInputBundle, canonical_builder_input_manifest_bytes
+from eval_harness.builders.inputs import (
     StagedBuilderInput,
     load_builder_input_bundle,
     stage_builder_inputs,
     verify_staged_builder_inputs,
 )
-from gdpval_harness.interventions.base import InterventionFile, compute_bundle_sha256
+from eval_harness.interventions.base import InterventionFile, compute_bundle_sha256
 
 
 class BuilderInputTests(unittest.TestCase):

@@ -6,8 +6,8 @@ from __future__ import annotations
 import unittest
 from typing import cast
 
-from gdpval_harness.builders.prompt import build_skill_task
-from gdpval_harness.executors.base import TaskSpec
+from eval_harness.builders.prompt import build_skill_task
+from eval_harness.executors.base import TaskSpec
 
 
 class BuilderPromptTests(unittest.TestCase):

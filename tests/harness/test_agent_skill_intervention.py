@@ -13,9 +13,9 @@ from pathlib import Path
 from typing import cast
 from unittest.mock import patch
 
-import gdpval_harness.interventions.agent_skill as agent_skill_module
-from gdpval_harness.executors.base import TaskSpec
-from gdpval_harness.interventions import (
+import eval_harness.interventions.agent_skill as agent_skill_module
+from eval_harness.executors.base import TaskSpec
+from eval_harness.interventions import (
     AgentSkillIntervention,
     ApplicationMapping,
     InterventionBundle,

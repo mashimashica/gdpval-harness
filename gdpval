@@ -164,7 +164,7 @@ AA_V2_MANIFEST="$ROOT/config/gdpval-aa-v2-references.tsv"
 cd "$ROOT"
 
 if [[ "${GDPVAL_COMMAND:-run}" == executors ]]; then
-  python3 -m gdpval_harness.executors.registry
+  python3 -m eval_harness.executors.registry
   exit 0
 fi
 
@@ -247,13 +247,13 @@ if [[ -n "${GDPVAL_JUDGE_EXECUTOR:-}" ]]; then
     *) echo "--judge-executor must be codex or claude-code" >&2; exit 2 ;;
   esac
   if [[ "${GDPVAL_COMMAND:-run}" == check ]]; then
-    exec python3 -m gdpval_harness.local_judge_runner check
+    exec python3 -m eval_harness.local_judge_runner check
   fi
   if [[ "${GDPVAL_COMMAND:-run}" != compare-runs ]]; then
     echo "--judge-executor is only valid with compare-runs or check" >&2
     exit 2
   fi
-  exec python3 -m gdpval_harness.local_judge_runner run
+  exec python3 -m eval_harness.local_judge_runner run
 fi
 
 if [[ -n "${GDPVAL_PROVIDER:-}" ]]; then
@@ -285,13 +285,13 @@ if [[ "$GDPVAL_EXECUTOR" != stirrup ]]; then
     exit 2
   fi
   if [[ "${GDPVAL_COMMAND:-run}" == check ]]; then
-    exec python3 -m gdpval_harness.local_runner check
+    exec python3 -m eval_harness.local_runner check
   fi
   if [[ "${GDPVAL_COMMAND:-run}" != run ]]; then
     echo "executor '$GDPVAL_EXECUTOR' is not valid for command '${GDPVAL_COMMAND:-run}'" >&2
     exit 2
   fi
-  exec python3 -m gdpval_harness.local_runner run
+  exec python3 -m eval_harness.local_runner run
 fi
 
 if [[ -n "${GDPVAL_CONDITION_FILE:-}" ]]; then

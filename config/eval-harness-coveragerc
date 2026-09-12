@@ -1,0 +1,16 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+[run]
+branch = false
+source = eval_harness
+parallel = true
+relative_files = true
+patch = subprocess
+data_file = results/.coverage-eval-harness
+
+[report]
+skip_covered = true
+sort = miss
+precision = 2
+fail_under = 96.0

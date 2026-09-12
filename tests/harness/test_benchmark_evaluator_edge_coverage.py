@@ -26,28 +26,28 @@ from pathlib import Path
 from typing import cast
 from unittest.mock import patch
 
-import gdpval_harness.benchmarks.gdpval as gdpval_benchmark
-import gdpval_harness.evaluators.aime26 as aime26_evaluator
-import gdpval_harness.evaluators.bigcodebench as bigcodebench_evaluator
-import gdpval_harness.evaluators.gdpval as gdpval_evaluator
-import gdpval_harness.evaluators.pairwise as pairwise_evaluator
-from gdpval_harness.benchmarks.aime26 import AIME26Benchmark
-from gdpval_harness.benchmarks.base import BenchmarkTask
-from gdpval_harness.benchmarks.bigcodebench import BigCodeBenchBenchmark
-from gdpval_harness.benchmarks.gdpval import GDPvalBenchmark
-from gdpval_harness.evaluators.aime26 import AIME26Evaluator
-from gdpval_harness.evaluators.base import (
+import eval_harness.benchmarks.gdpval as gdpval_benchmark
+import eval_harness.evaluators.aime26 as aime26_evaluator
+import eval_harness.evaluators.bigcodebench as bigcodebench_evaluator
+import eval_harness.evaluators.gdpval as gdpval_evaluator
+import eval_harness.evaluators.pairwise as pairwise_evaluator
+from eval_harness.benchmarks.aime26 import AIME26Benchmark
+from eval_harness.benchmarks.base import BenchmarkTask
+from eval_harness.benchmarks.bigcodebench import BigCodeBenchBenchmark
+from eval_harness.benchmarks.gdpval import GDPvalBenchmark
+from eval_harness.evaluators.aime26 import AIME26Evaluator
+from eval_harness.evaluators.base import (
     EvaluationCandidate,
     EvaluationPlan,
     EvaluationRequest,
     EvaluationStatus,
 )
-from gdpval_harness.evaluators.bigcodebench import BigCodeBenchEvaluator
-from gdpval_harness.evaluators.exact import ExactMatchEvaluator
-from gdpval_harness.evaluators.gdpval import GDPvalExternalEvaluator
-from gdpval_harness.evaluators.pairwise import PairwiseJudgeEvaluator
-from gdpval_harness.executors.base import ExecutionResult, ExecutionStatus, TaskSpec
-from gdpval_harness.judges.base import JudgeExecutor, JudgePreflightResult, JudgeRequest, JudgeResult, Verdict
+from eval_harness.evaluators.bigcodebench import BigCodeBenchEvaluator
+from eval_harness.evaluators.exact import ExactMatchEvaluator
+from eval_harness.evaluators.gdpval import GDPvalExternalEvaluator
+from eval_harness.evaluators.pairwise import PairwiseJudgeEvaluator
+from eval_harness.executors.base import ExecutionResult, ExecutionStatus, TaskSpec
+from eval_harness.judges.base import JudgeExecutor, JudgePreflightResult, JudgeRequest, JudgeResult, Verdict
 
 
 def _execution(
@@ -200,13 +200,13 @@ class BenchmarkPreparationCoverageTests(unittest.TestCase):
 
             benchmark.prepare_script.touch()
             with patch(
-                "gdpval_harness.benchmarks.aime26.subprocess.run",
+                "eval_harness.benchmarks.aime26.subprocess.run",
                 return_value=subprocess.CompletedProcess([], 3),
             ):
                 with self.assertRaisesRegex(RuntimeError, "failed to prepare"):
                     benchmark.prepare()
             with patch(
-                "gdpval_harness.benchmarks.aime26.subprocess.run",
+                "eval_harness.benchmarks.aime26.subprocess.run",
                 return_value=subprocess.CompletedProcess([], 0),
             ):
                 with self.assertRaisesRegex(RuntimeError, "failed to prepare"):
@@ -234,13 +234,13 @@ class BenchmarkPreparationCoverageTests(unittest.TestCase):
 
             benchmark.prepare_script.touch()
             with patch(
-                "gdpval_harness.benchmarks.bigcodebench.subprocess.run",
+                "eval_harness.benchmarks.bigcodebench.subprocess.run",
                 return_value=subprocess.CompletedProcess([], 1),
             ):
                 with self.assertRaisesRegex(RuntimeError, "failed to prepare"):
                     benchmark.prepare()
             with patch(
-                "gdpval_harness.benchmarks.bigcodebench.subprocess.run",
+                "eval_harness.benchmarks.bigcodebench.subprocess.run",
                 return_value=subprocess.CompletedProcess([], 0),
             ):
                 with self.assertRaisesRegex(RuntimeError, "failed to prepare"):
@@ -267,7 +267,7 @@ class BenchmarkPreparationCoverageTests(unittest.TestCase):
                 )
                 return subprocess.CompletedProcess([], 0)
 
-            with patch("gdpval_harness.benchmarks.bigcodebench.subprocess.run", side_effect=prepare_dataset):
+            with patch("eval_harness.benchmarks.bigcodebench.subprocess.run", side_effect=prepare_dataset):
                 benchmark.prepare()
             self.assertTrue(benchmark.is_prepared())
             benchmark.prepare()
@@ -303,13 +303,13 @@ class BenchmarkPreparationCoverageTests(unittest.TestCase):
                 benchmark.prepare()
             benchmark.prepare_script.touch()
             with patch(
-                "gdpval_harness.benchmarks.gdpval.subprocess.run",
+                "eval_harness.benchmarks.gdpval.subprocess.run",
                 return_value=subprocess.CompletedProcess([], 2),
             ):
                 with self.assertRaisesRegex(RuntimeError, "failed to prepare"):
                     benchmark.prepare()
             with patch(
-                "gdpval_harness.benchmarks.gdpval.subprocess.run",
+                "eval_harness.benchmarks.gdpval.subprocess.run",
                 return_value=subprocess.CompletedProcess([], 0),
             ):
                 with self.assertRaisesRegex(RuntimeError, "failed to prepare"):
@@ -416,7 +416,7 @@ class BenchmarkPreparationCoverageTests(unittest.TestCase):
 class NativeEvaluatorCoverageTests(unittest.TestCase):
     def test_aime_native_verifier_handles_empty_and_malformed_native_results(self) -> None:
         empty_helper = _MathHelper("", (1.0, "ignored"))
-        with patch("gdpval_harness.evaluators.aime26.importlib.import_module", return_value=empty_helper):
+        with patch("eval_harness.evaluators.aime26.importlib.import_module", return_value=empty_helper):
             self.assertEqual(aime26_evaluator._native_math_evaluate("42", "no answer"), (0.0, None))
         self.assertEqual(empty_helper.metric_calls, 0)
 
@@ -427,19 +427,19 @@ class NativeEvaluatorCoverageTests(unittest.TestCase):
         ):
             helper = _MathHelper("42", raw_result)
             with self.subTest(raw_result=raw_result):
-                with patch("gdpval_harness.evaluators.aime26.importlib.import_module", return_value=helper):
+                with patch("eval_harness.evaluators.aime26.importlib.import_module", return_value=helper):
                     with self.assertRaisesRegex(TypeError, expected_message):
                         aime26_evaluator._native_math_evaluate("42", "\\boxed{42}")
 
         helper = _MathHelper("42", (0.5, "42"))
-        with patch("gdpval_harness.evaluators.aime26.importlib.import_module", return_value=helper):
+        with patch("eval_harness.evaluators.aime26.importlib.import_module", return_value=helper):
             self.assertEqual(aime26_evaluator._native_math_evaluate("42", "\\boxed{42}"), (0.5, "42"))
         self.assertEqual(helper.metric_calls, 1)
         self.assertEqual(helper.verify_calls, 1)
 
     def test_aime_preflight_reports_dependency_and_helper_failures(self) -> None:
         with patch(
-            "gdpval_harness.evaluators.aime26.importlib.metadata.version",
+            "eval_harness.evaluators.aime26.importlib.metadata.version",
             side_effect=importlib.metadata.PackageNotFoundError("math-verify"),
         ):
             missing, detail, version = aime26_evaluator._math_verify_preflight()
@@ -448,7 +448,7 @@ class NativeEvaluatorCoverageTests(unittest.TestCase):
         self.assertIn("not installed", detail)
 
         with patch(
-            "gdpval_harness.evaluators.aime26.importlib.metadata.version",
+            "eval_harness.evaluators.aime26.importlib.metadata.version",
             side_effect=RuntimeError("metadata unavailable"),
         ):
             available, detail, version = aime26_evaluator._math_verify_preflight()
@@ -456,16 +456,16 @@ class NativeEvaluatorCoverageTests(unittest.TestCase):
         self.assertIsNone(version)
         self.assertIn("metadata unavailable", detail)
 
-        with patch("gdpval_harness.evaluators.aime26.importlib.metadata.version", return_value="0.7.0"):
+        with patch("eval_harness.evaluators.aime26.importlib.metadata.version", return_value="0.7.0"):
             available, detail, version = aime26_evaluator._math_verify_preflight()
         self.assertFalse(available)
         self.assertEqual(version, "0.7.0")
         self.assertIn("found math-verify==0.7.0", detail)
 
         with (
-            patch("gdpval_harness.evaluators.aime26.importlib.metadata.version", return_value="0.8.0"),
+            patch("eval_harness.evaluators.aime26.importlib.metadata.version", return_value="0.8.0"),
             patch(
-                "gdpval_harness.evaluators.aime26.importlib.import_module",
+                "eval_harness.evaluators.aime26.importlib.import_module",
                 side_effect=ImportError("helper unavailable"),
             ),
         ):
@@ -475,8 +475,8 @@ class NativeEvaluatorCoverageTests(unittest.TestCase):
         self.assertIn("helper cannot import", detail)
 
         with (
-            patch("gdpval_harness.evaluators.aime26.importlib.metadata.version", return_value="0.8.0"),
-            patch("gdpval_harness.evaluators.aime26.importlib.import_module", return_value=object()),
+            patch("eval_harness.evaluators.aime26.importlib.metadata.version", return_value="0.8.0"),
+            patch("eval_harness.evaluators.aime26.importlib.import_module", return_value=object()),
         ):
             available, detail, version = aime26_evaluator._math_verify_preflight()
         self.assertTrue(available)
@@ -522,7 +522,7 @@ class NativeEvaluatorCoverageTests(unittest.TestCase):
                             "resources_servers.bigcodebench.code_extraction.preprocess_code_completion",
                             return_value="return 1",
                         ),
-                        patch("gdpval_harness.evaluators.bigcodebench.subprocess.run", side_effect=process_error),
+                        patch("eval_harness.evaluators.bigcodebench.subprocess.run", side_effect=process_error),
                     ):
                         result = bigcodebench_evaluator._native_bigcodebench_evaluate(
                             "```python\nreturn 1\n```",
@@ -539,7 +539,7 @@ class NativeEvaluatorCoverageTests(unittest.TestCase):
                     return_value="return 1",
                 ),
                 patch(
-                    "gdpval_harness.evaluators.bigcodebench.subprocess.run",
+                    "eval_harness.evaluators.bigcodebench.subprocess.run",
                     return_value=subprocess.CompletedProcess(["python"], 4, stdout="not json", stderr="bad"),
                 ),
             ):
@@ -748,7 +748,7 @@ class GDPvalEvaluatorSafetyCoverageTests(unittest.TestCase):
                     result_status="completed",
                 )
 
-            with patch("gdpval_harness.evaluators.gdpval.os.open", side_effect=OSError("directory fsync unavailable")):
+            with patch("eval_harness.evaluators.gdpval.os.open", side_effect=OSError("directory fsync unavailable")):
                 gdpval_evaluator._fsync_directory(root)
 
     def test_gdpval_publish_cleans_staging_after_atomic_rename_failure(self) -> None:
@@ -760,7 +760,7 @@ class GDPvalEvaluatorSafetyCoverageTests(unittest.TestCase):
             workspace = root / "workspace"
             workspace.mkdir()
             destination = root / "handoff"
-            with patch("gdpval_harness.evaluators.gdpval.os.replace", side_effect=OSError("rename failed")):
+            with patch("eval_harness.evaluators.gdpval.os.replace", side_effect=OSError("rename failed")):
                 with self.assertRaisesRegex(OSError, "rename failed"):
                     gdpval_evaluator._publish(
                         source_deliverables=deliverables,
@@ -781,7 +781,7 @@ class GDPvalEvaluatorSafetyCoverageTests(unittest.TestCase):
                 original_rmdir(path)
 
             with (
-                patch("gdpval_harness.evaluators.gdpval.os.replace", side_effect=OSError("rename failed")),
+                patch("eval_harness.evaluators.gdpval.os.replace", side_effect=OSError("rename failed")),
                 patch.object(Path, "rmdir", new=refuse_cleanup),
             ):
                 with self.assertRaisesRegex(OSError, "rename failed"):
@@ -819,7 +819,7 @@ class PairwiseAndExactCoverageTests(unittest.TestCase):
         self.assertTrue(keyword.ok)
         no_argument = pairwise_evaluator._call_preflight(cast(JudgeExecutor, _NoArgumentPreflight()), {})
         self.assertTrue(no_argument.ok)
-        with patch("gdpval_harness.evaluators.pairwise.inspect.signature", side_effect=TypeError("opaque")):
+        with patch("eval_harness.evaluators.pairwise.inspect.signature", side_effect=TypeError("opaque")):
             fallback = pairwise_evaluator._call_preflight(cast(JudgeExecutor, _Judge()), {})
         self.assertTrue(fallback.ok)
         self.assertIsNone(pairwise_evaluator._jsonable_verdict(None))
@@ -965,7 +965,7 @@ class PairwiseAndExactCoverageTests(unittest.TestCase):
             directory = Path(tmp)
             with (
                 patch(
-                    "gdpval_harness.evaluators.pairwise.write_trial_metadata", side_effect=RuntimeError("write failed")
+                    "eval_harness.evaluators.pairwise.write_trial_metadata", side_effect=RuntimeError("write failed")
                 ),
                 patch.object(Path, "unlink", side_effect=OSError("unlink failed")),
             ):

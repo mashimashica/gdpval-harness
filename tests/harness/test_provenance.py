@@ -17,9 +17,9 @@ from subprocess import CompletedProcess
 from typing import cast
 from unittest.mock import patch
 
-import gdpval_harness.provenance as provenance_module
-from gdpval_harness.executors.base import ExecutionResult, ExecutionStatus, TaskSpec
-from gdpval_harness.provenance import (
+import eval_harness.provenance as provenance_module
+from eval_harness.executors.base import ExecutionResult, ExecutionStatus, TaskSpec
+from eval_harness.provenance import (
     RepositoryProvenance,
     canonical_json_sha256,
     execution_record,
@@ -158,7 +158,7 @@ class ProvenanceTests(unittest.TestCase):
         status = CompletedProcess([], 0, stdout=" M private-name.txt\n", stderr="secret status stderr")
         original_optional = os.environ.get("GIT_OPTIONAL_LOCKS")
         original_prompt = os.environ.get("GIT_TERMINAL_PROMPT")
-        with patch("gdpval_harness.provenance.subprocess.run", side_effect=[head, status]) as run:
+        with patch("eval_harness.provenance.subprocess.run", side_effect=[head, status]) as run:
             observed = repository_provenance(start)
 
         self.assertEqual(observed, RepositoryProvenance(_SHA1, "available", "dirty"))
@@ -201,14 +201,14 @@ class ProvenanceTests(unittest.TestCase):
             CompletedProcess([], 0, stdout="malformed-head\nextra", stderr=""),
         )
         for head in cases:
-            with self.subTest(head=head), patch("gdpval_harness.provenance.subprocess.run", return_value=head) as run:
+            with self.subTest(head=head), patch("eval_harness.provenance.subprocess.run", return_value=head) as run:
                 observed = repository_provenance(start)
             self.assertEqual(observed, RepositoryProvenance(None, "unavailable", "unavailable"))
             self.assertEqual(run.call_count, 1)
 
         head = CompletedProcess([], 0, stdout=f"{_SHA1}\n", stderr="")
         status_failure = CompletedProcess([], 1, stdout="", stderr="status secret")
-        with patch("gdpval_harness.provenance.subprocess.run", side_effect=[head, status_failure]) as run:
+        with patch("eval_harness.provenance.subprocess.run", side_effect=[head, status_failure]) as run:
             observed = repository_provenance(start)
         self.assertEqual(observed, RepositoryProvenance(_SHA1, "available", "unavailable"))
         self.assertEqual(run.call_count, 2)
